@@ -222,15 +222,26 @@ def build_state():
         quota_limit = gw.limit_for("monthly") or 60.0
         global_limit = quota_limit
         used_all = sum((x.get("cost_total") or 0.0) for x in stats)
-        global_remain = max(0.0, global_limit - used_all)
+        # 全局剩余: 官方进度口径(折算已用−抵扣); 有官方窗口时直接用 monthly 窗口剩余
+        mwin = next((w for w in windows if w.get("kind") == "monthly"), None)
+        if mwin is not None:
+            global_remain = max(0.0, mwin.get("limit", global_limit) - mwin.get("used", 0.0))
+        else:
+            used_all_rated = sum((x.get("cost_total") or 0.0) * (x.get("meter_rate") or 1.0)
+                                 for x in stats if x.get("source") == "go")
+            global_remain = max(0.0, global_limit - used_all_rated)
         weeks_per_month = float((_FORMULA_STORE.get({}).get("constants", {}) or {}).get("weeks_per_month", 4.345))
         periods_per_day = float((_FORMULA_STORE.get({}).get("constants", {}) or {}).get("periods_per_day", 6.0))
 
         for x in stats:
             mq = x.get("model_quota") or 0.0
             mu = x.get("model_used") or 0.0
-            mr = max(0.0, mq - mu)
-            x["model_remain"] = fr.compute("model_remain", model_quota=mq, model_used=mu) or mr
+            # 折算口径: used×meter_rate, 剩余 = 额度 − 折算已用 (与进度/全部口径一致)
+            rate = x.get("meter_rate") or 1.0
+            mu_rated = mu * rate
+            mr = max(0.0, mq - mu_rated)
+            x["model_used_rated"] = round(mu_rated, 4)
+            x["model_remain"] = fr.compute("model_remain", model_quota=mq, model_used=mu_rated) or mr
 
             cq_w = fr.compute("cq_weekly", model_quota=mq, weeks_per_month=weeks_per_month)
             cq_s = fr.compute("cq_session", model_quota=mq, periods_per_day=periods_per_day)
@@ -251,14 +262,16 @@ def build_state():
             else:
                 avg_monthly = avg_weekly = avg_session = 0.0
 
-            x["tq_monthly"] = fr.compute("tq_monthly", cq_monthly=mq, avg_monthly_cost_per_token=avg_monthly)
-            x["tq_weekly"] = fr.compute("tq_weekly", cq_weekly=cq_w, avg_weekly_cost_per_token=avg_weekly)
-            x["tq_session"] = fr.compute("tq_session", cq_session=cq_s, avg_session_cost_per_token=avg_session)
+            x["effective_remain"] = fr.compute("effective_remain", model_remain=mr, global_remain=global_remain) or min(mr, global_remain)
+            # token 配额反推: 以"实际剩余费用"(全局约束后)为准, 不用模型额度——额度用完后剩余=0
+            er = x.get("effective_remain") or 0.0
+            x["tq_monthly"] = fr.compute("tq_monthly", cq_monthly=er, avg_monthly_cost_per_token=avg_monthly)
+            x["tq_weekly"] = fr.compute("tq_weekly", cq_weekly=min(cq_w, er), avg_weekly_cost_per_token=avg_weekly)
+            x["tq_session"] = fr.compute("tq_session", cq_session=min(cq_s, er), avg_session_cost_per_token=avg_session)
             x["tp_monthly"] = fr.compute("tp_monthly", tok_monthly=monthly_tok, tq_monthly=x.get("tq_monthly") or 1)
             x["tp_weekly"] = fr.compute("tp_weekly", tok_weekly=weekly_tok, tq_weekly=x.get("tq_weekly") or 1)
             x["tp_session"] = fr.compute("tp_session", tok_session=session_tok, tq_session=x.get("tq_session") or 1)
 
-            x["effective_remain"] = fr.compute("effective_remain", model_remain=mr, global_remain=global_remain) or min(mr, global_remain)
             x["avg_per_req"] = fr.compute("avg_per_req", cost_of_period=x.get("cost_m") or 0.0, used_count=x.get("count_m") or 0, est_req_cost=x.get("est_req_cost") or 0.0)
             x["remain_cnt"] = fr.compute("remain_cnt", effective_remain=x.get("effective_remain") or 0.0, avg_per_req=x.get("avg_per_req") or 0.0)
             x["cache_hit"] = fr.compute("cache_hit", cache_read=x.get("cache_read") or 0, tokens_in=x.get("tokens_in") or 0)
