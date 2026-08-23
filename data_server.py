@@ -11,6 +11,7 @@ import sys
 import threading
 import time
 import datetime
+import bisect
 import importlib.util
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -198,6 +199,9 @@ def build_state():
     # 行级折算率: 前端聚合/明细按模型折算 (v5 口径, 与总进度对账闭合)
     for r in rows:
         r["rate"] = gw.rate_for(gw.norm_model(r.get("model") or ""), r.get("src"))
+    # 其他账号(本地估算)金额合计: 进度类排除, 全部视图含
+    other_cost = round(sum((r.get("cost") or 0.0) * r.get("rate", 1.0)
+                           for r in rows if r.get("account") == "other"), 4)
     stats = gw.model_stats(rows, now_ms, cost_map, all_go_models)
     history = gw.model_history(rows, days=0)
     suppliers = gw.supplier_stats(rows)
@@ -279,6 +283,7 @@ def build_state():
         "period_deduct": round(period_deduct, 2),
         "subscription_source": _SUB_START.get("source", "none"),
         "subscription_fetched_at": _SUB_START.get("fetched_at", 0),
+        "other_cost": other_cost,
         "server_error": None,
         "server_configured": bool(srv_cfg.get("auth_cookie")) or bool(srv),
         "ts": now_ms,
@@ -443,6 +448,42 @@ def _apply_server_quota(windows, applied_credits=0):
         w["calibrated"] = True
 
 
+# 本地-官方逐条匹配窗口(ms): 自己账号的记录应与官方同模型记录时间接近
+_OWN_MATCH_MS = 120000
+
+
+def _split_own_other(local_rows, remote_rows):
+    """分账: 本地记录与官方逐条匹配(±120s, 一条官方最多配一条本地)。
+    命中 → 自己账号(丢弃, 官方为准); 未命中 → 其他账号(保留, account="other")。
+    官方索引为空(未登录)时全部本地行归 other。"""
+    if not remote_rows:
+        for r in local_rows:
+            r["account"] = "other"
+        return local_rows
+    off_by_model = {}
+    for r in remote_rows:
+        off_by_model.setdefault(r["model"], []).append(r["ts"])
+    for m in off_by_model:
+        off_by_model[m].sort()
+    used = {}   # model -> set(已消费官方索引)
+    extra = []
+    for r in local_rows:
+        lst = off_by_model.get(r["model"])
+        found = False
+        if lst:
+            used_set = used.setdefault(r["model"], set())
+            i = bisect.bisect_left(lst, r["ts"])
+            for j in (i - 1, i, i + 1):
+                if 0 <= j < len(lst) and j not in used_set and abs(lst[j] - r["ts"]) <= _OWN_MATCH_MS:
+                    used_set.add(j)
+                    found = True
+                    break
+        if not found:
+            r["account"] = "other"
+            extra.append(r)
+    return extra
+
+
 def _collect_rows():
     remote_rows = []
     cost_map = {}
@@ -454,12 +495,8 @@ def _collect_rows():
             remote_rows = []
             cost_map = {}
     if remote_rows:
-        srv_keys = {(r["model"], r.get("src")) for r in remote_rows}
-        latest_fetched = ur.read_remote_latest_fetched_at() if ur is not None else 0
         local_rows = gw.read_opencode_all()
-        extra = [r for r in local_rows
-                 if (r["model"], r.get("src")) not in srv_keys
-                 or r["ts"] > latest_fetched]
+        extra = _split_own_other(local_rows, remote_rows)
         return remote_rows + extra, cost_map
 
     srv_rows = []
@@ -475,12 +512,8 @@ def _collect_rows():
                 cost_map = sd.read_cost_map()
             except Exception:
                 pass
-        srv_keys = {(r["model"], r.get("src")) for r in srv_rows}
-        latest_fetched = sd.read_latest_fetched_at() if sd is not None else 0
         local_rows = gw.read_opencode_all()
-        extra = [r for r in local_rows
-                 if (r["model"], r.get("src")) not in srv_keys
-                 or r["ts"] > latest_fetched]
+        extra = _split_own_other(local_rows, srv_rows)
         return srv_rows + extra, cost_map
     go_rows = gw.read_opencode_all()
     try:
@@ -496,6 +529,9 @@ def _collect_rows():
             gw.save_config(cfg)
         except Exception:
             pass
+    # 未登录/无官方数据: 全本地, 全归 other
+    for r in go_rows:
+        r["account"] = "other"
     return go_rows + cx_rows, {}
 
 

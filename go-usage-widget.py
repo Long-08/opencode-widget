@@ -529,9 +529,10 @@ def month_bounds(now_ms, subscribe_ms):
 
 def build_windows(rows, now_ms, applied_credits=0, period_start=0):
     # 折算口径: 每条消费按模型折算率换算成官方 used (官方 pct 分母=基础额度)
-    # gateway 等 go 子集来源是同一消耗的本地镜像, 排除避免双计 (与 supplier_stats "all" 口径一致)
+    # gateway 等 go 子集来源是同一消耗的本地镜像, 排除避免双计; other(其他账号)不进进度
     def counted(r):
-        return (r.get("cost") or 0.0) > 0 and r.get("src") not in SUBSET_SRCS
+        return (r.get("cost") or 0.0) > 0 and r.get("src") not in SUBSET_SRCS \
+            and r.get("account") != "other"
 
     def rated(r):
         return r["cost"] * rate_for(norm_model(r["model"]), r.get("src"))
@@ -819,8 +820,9 @@ def model_history(rows, days=14):
         d = datetime.fromtimestamp(r["ts"] / 1000, LOCAL_TZ).strftime("%Y-%m-%d")
         m = norm_model(r["model"])
         src = r.get("src") or "?"
-        # 供应商只管自己的模型: 付费模型也按 (model, src) 分桶, 不再统一归 go
-        key = (m, src)
+        acct = r.get("account") or "own"
+        # 供应商只管自己的模型: 付费模型也按 (model, src, account) 分桶, 不再统一归 go
+        key = (m, src, acct)
         b = buckets.setdefault(key, {}).setdefault(d, [0.0, 0, 0, 0, 0])
         b[0] += (r["cost"] if r["cost"] is not None else 0.0) * rate_for(m, src)
         b[1] += 1
@@ -831,13 +833,13 @@ def model_history(rows, days=14):
         b[4] += (cache.get("read", 0) or 0) + (cache.get("write", 0) or 0)
 
     out = []
-    for (m, src), days_map in buckets.items():
+    for (m, src, acct), days_map in buckets.items():
         series = [{"date": k, "cost": round(v[0], 4), "count": v[1],
                    "tokens_in": v[2], "tokens_out": v[3], "tokens_cache": v[4]}
                   for k, v in sorted(days_map.items())]
         name = DISPLAY_NAMES.get(m, m)
-        out.append({"model": m, "source": src, "key": f"{m}|{src}",
-                    "name": name, "is_free": is_free_model(m),
+        out.append({"model": m, "source": src, "account": acct,
+                    "key": f"{m}|{src}", "name": name, "is_free": is_free_model(m),
                     "series": series})
     out.sort(key=lambda x: -sum(p["cost"] for p in x["series"]))
     return out
@@ -867,7 +869,8 @@ def supplier_stats(rows):
         cost = (r.get("cost") or 0.0) * rate_for(norm_model(r["model"]), src)
         d = datetime.fromtimestamp(r["ts"] / 1000, LOCAL_TZ).strftime("%Y-%m-%d")
         for key in (src, "all"):
-            if key == "all" and src in SUBSET_SRCS:
+            # 子集来源(如 gateway)登录账号是镜像防双计; 其他账号(account=other)独立消费保留
+            if key == "all" and src in SUBSET_SRCS and r.get("account") != "other":
                 continue
             s = agg.setdefault(key, {"tokens": 0, "cost": 0.0, "input": 0, "output": 0,
                                      "cache": 0, "count": 0, "days": set()})
@@ -896,22 +899,23 @@ def heatmap(rows, days=None):
         if start is not None and r["ts"] < start:
             continue
         src = r.get("src") or "?"
+        acct = r.get("account") or "own"
         d = datetime.fromtimestamp(r["ts"] / 1000, LOCAL_TZ).strftime("%Y-%m-%d")
         tk = r.get("tokens") or {}
         ti = tk.get("input", 0) or 0
         to = tk.get("output", 0) or 0
         cache = tk.get("cache") or {}
         tc = (cache.get("read", 0) or 0) + (cache.get("write", 0) or 0)
-        b = buckets.setdefault((d, src), [0.0, 0, 0, 0, 0])
+        b = buckets.setdefault((d, src, acct), [0.0, 0, 0, 0, 0])
         b[0] += (r.get("cost") or 0.0) * rate_for(norm_model(r["model"]), src)
         b[1] += 1
         b[2] += ti
         b[3] += to
         b[4] += tc
-    out = [{"date": d, "src": s, "cost": round(c, 4), "count": n,
+    out = [{"date": d, "src": s, "account": a, "cost": round(c, 4), "count": n,
             "input": int(ti), "output": int(to), "cache": int(tc),
             "tokens": int(ti + to + tc)}
-           for (d, s), (c, n, ti, to, tc) in sorted(buckets.items())]
+           for (d, s, a), (c, n, ti, to, tc) in sorted(buckets.items())]
     return out
 
 

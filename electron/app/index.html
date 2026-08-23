@@ -799,7 +799,7 @@ const src = selSupplier;
 const isFree = mFilter === "free";
 const items = state.history.filter(h => {
 if (isFree) return h.is_free;
-return src ? h.source === src : !SUBSET_SRCS.includes(h.source);
+return src ? h.source === src : (!SUBSET_SRCS.includes(h.source) || h.account === "other");
 });
 const byDate = {};
     items.forEach(h => (h.series || []).forEach(p => {
@@ -1148,7 +1148,7 @@ function aggForRange(range) {
   state.history.forEach(h => {
     if (isFree) { if (!h.is_free) return; }
     else if (src) { if (h.source !== src) return; }
-    else if (SUBSET_SRCS.includes(h.source)) return;
+    else if (SUBSET_SRCS.includes(h.source) && h.account !== "other") return;
     (h.series || []).forEach(p => {
       const b = byDate[p.date] || (byDate[p.date] = { cost: 0, tokens: 0, count: 0, days: 1 });
       b.cost += p.cost || 0;
@@ -1351,7 +1351,7 @@ render();
 
   // ---- 统计卡（跟随供应商 + 时间范围）----
   const hmRows = state.heatmap.filter(x => src === "all"
-    ? !SUBSET_SRCS.includes(x.src)
+    ? (!SUBSET_SRCS.includes(x.src) || x.account === "other")
     : x.src === src);
   const nowD = new Date();
   let startD = new Date(nowD);
@@ -1367,21 +1367,32 @@ render();
   if (isModelSel) {
     agg = modelAggForRange(selModel, heatRange);
   } else {
-    agg = { tokens: 0, cost: 0, count: 0, input: 0, output: 0, cache: 0, days: new Set() };
-    hmRows.forEach(x => {
-      if (startDate && x.date < startDate) return;
-      agg.tokens += x.tokens || 0;
-      agg.cost += x.cost || 0;
-      agg.count += x.count || 0;
-      agg.input += x.input || 0;
-      agg.output += x.output || 0;
-      agg.cache += x.cache || 0;
-      agg.days.add(x.date);
-    });
-    agg.days = agg.days.size;
-    // "本期"与官方进度口径对齐: 减本期抵扣(次数×$5); 全部=全览统计不减; 短范围/单模型不减
-    if ((src === "all" || src === "go") && heatRange === "30") {
-      agg.cost = Math.max(0, agg.cost - (state.period_deduct || 0));
+    // "本期"(30d): 优先用后端 view(go_30d/all_30d) totals — 仅登录账号官方口径, 已减抵扣
+    // (后端对 range!=all 过滤 account=other, 保证进度口径纯净)
+    const pv = (heatRange === "30" && (src === "all" || src === "go"))
+      ? (state._viewCache && state._viewCache[viewIdFor(src, "30")])
+      : null;
+    if (pv && pv.totals) {
+      agg = { tokens: pv.totals.tokens || 0, cost: pv.totals.cost || 0, count: pv.totals.count || 0,
+              input: pv.totals.input || 0, output: pv.totals.output || 0, cache: pv.totals.cache || 0,
+              days: pv.totals.days || 0 };
+    } else {
+      agg = { tokens: 0, cost: 0, count: 0, input: 0, output: 0, cache: 0, days: new Set() };
+      hmRows.forEach(x => {
+        if (startDate && x.date < startDate) return;
+        agg.tokens += x.tokens || 0;
+        agg.cost += x.cost || 0;
+        agg.count += x.count || 0;
+        agg.input += x.input || 0;
+        agg.output += x.output || 0;
+        agg.cache += x.cache || 0;
+        agg.days.add(x.date);
+      });
+      agg.days = agg.days.size;
+      // 回退路径: 本期减本期抵扣; 全部=全览统计不减
+      if ((src === "all" || src === "go") && heatRange === "30") {
+        agg.cost = Math.max(0, agg.cost - (state.period_deduct || 0));
+      }
     }
   }
   const row = $("#dStatsRow");
@@ -1460,6 +1471,7 @@ async function refresh() {
     state._viewCache = {};
     const src0 = selSupplier || "all";
     const needed = new Set([viewIdFor(src0, timeRange), viewIdFor(src0, "all"), "all_all", viewIdFor("all", heatRange), "all_daily"]);
+    if (heatRange === "30" && src0 !== "all") needed.add(viewIdFor(src0, "30"));
     if (selModel && selModel !== "__total__") {
       needed.add(`model_${selModel}_${heatRange}`);
       needed.add(`model_${selModel}_daily`);

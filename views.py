@@ -403,7 +403,10 @@ class ViewEngine:
     def _scope_rows(self, rows, scope):
         if not scope or scope.get("all"):
             sub = self.subset
-            return [r for r in rows if r.get("src") not in sub]
+            # 子集来源(如 gateway)是登录账号调用的镜像, 排除防双计;
+            # 其他账号(account=other)的 gateway 记录官方没有, 是独立消费, 保留
+            return [r for r in rows
+                    if r.get("src") not in sub or r.get("account") == "other"]
         if "source" in scope:
             s = scope["source"]
             return [r for r in rows if r.get("src") == s]
@@ -423,6 +426,9 @@ class ViewEngine:
         view = self.resolve_view(vid)
         cutoff = self._cutoff(view.get("range"))
         scoped = self._scope_rows(rows, view.get("scope"))
+        # 分账: 本期/7天/today 只算登录账号(官方); "全部"含其他账号(本地估算)
+        if view.get("range") != "all":
+            scoped = [r for r in scoped if r.get("account") != "other"]
         daily = {}
         for r in scoped:
             d = self._day(r["ts"])
