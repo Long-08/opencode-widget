@@ -17,6 +17,7 @@
   - post.meterRatio: 只作用于 totals.cost (daily 保持原始), 当 scope 为 all 或 source 在 params.sources.paid 时 ×params.meter.ratio
 """
 import json
+import hashlib
 import os
 import time
 import urllib.request
@@ -234,38 +235,111 @@ DEFAULT_FORMULA = {
 _RANGES = {"today": "today", "1": "today", "7d": "7d", "7": "7d",
            "30d": "30d", "30": "30d", "all": "all"}
 
+DEFAULT_FORMULA_URL = "https://opencode-formula.opencode-widget.workers.dev/formula"
+
+
+def resolve_formula_url(url=None):
+    """解析生效的公式来源。空串/None → FORMULA_URL 环境变量 → workers.dev 默认。
+
+    (非空 url 优先; 空串保持历史默认 workers.dev, 兼容 "formula_url": ""。)
+    """
+    return url or os.environ.get("FORMULA_URL") or DEFAULT_FORMULA_URL
+
+
+def _sha256_hex(text):
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+# Canonical hash of the built-in fallback formula (sort_keys + ensure_ascii=False).
+_DEFAULT_CANONICAL = json.dumps(DEFAULT_FORMULA, sort_keys=True, ensure_ascii=False)
+DEFAULT_FORMULA_HASH = hashlib.sha256(_DEFAULT_CANONICAL.encode("utf-8")).hexdigest()
+
 
 class FormulaError(Exception):
     pass
 
 
 class FormulaStore:
-    """拉取/缓存/回退公式。url 可为 http(s) 或本地文件路径。"""
+    """拉取/缓存/回退公式。url 可为 http(s) 或本地文件路径。
 
-    def __init__(self, url=None, ttl=900):
-        self.url = url or os.environ.get("FORMULA_URL") or "https://opencode-formula.opencode-widget.workers.dev/formula"
+    enabled=False 时完全不联网, 直接使用内置 DEFAULT_FORMULA (source="disabled")。
+    meta() 额外暴露 hash/version/fallback/last_updated 溯源字段。
+    """
+
+    def __init__(self, url=None, ttl=900, enabled=True):
+        self.raw_url = url if url is not None else os.environ.get("FORMULA_URL")
+        self.url = resolve_formula_url(self.raw_url)
         self.ttl = ttl
+        self.enabled = enabled
+        # 当前生效公式的溯源状态
         self._formula = None
+        self._raw = None
+        self._hash = DEFAULT_FORMULA_HASH
+        self._version = DEFAULT_FORMULA.get("version")
+        self._fallback = True
         self._ts = 0.0
-        self._meta = {"source": "default", "url": self.url, "error": None, "fetched_at": 0}
+        self._meta = {"source": "default", "url": self.url, "error": None,
+                      "fetched_at": 0, "enabled": enabled,
+                      "hash": self._hash, "version": self._version,
+                      "last_updated": 0, "fallback": True}
 
     def refresh(self, force=False):
+        if not self.enabled:
+            # 禁用: 绝不调用 _fetch, 也不触网; 直接用内置默认公式
+            ts = int(time.time() * 1000)
+            self._formula = DEFAULT_FORMULA
+            self._raw = None
+            self._hash = DEFAULT_FORMULA_HASH
+            self._version = DEFAULT_FORMULA.get("version")
+            self._fallback = True
+            self._meta = {"source": "disabled", "url": self.url, "error": None,
+                          "fetched_at": ts, "enabled": False,
+                          "hash": self._hash, "version": self._version,
+                          "fallback": True}
+            return False
         if self.url:
             try:
                 data = self._fetch(self.url)
                 f = json.loads(data)
                 self._validate(f)
+                fetched_at = int(time.time() * 1000)
                 self._formula = f
+                self._raw = data
+                # 成功时 hash 针对"原始拉取串", 保证与云端字节一致
+                self._hash = _sha256_hex(data)
+                self._version = f.get("version")
+                self._fallback = False
                 self._meta = {"source": "cloud", "url": self.url, "error": None,
-                              "fetched_at": int(time.time() * 1000)}
+                              "fetched_at": fetched_at, "enabled": True,
+                              "hash": self._hash, "version": self._version,
+                              "last_updated": fetched_at, "fallback": False}
                 return True
             except Exception as e:
-                self._meta = {"source": "cloud" if self._formula is not None else "default",
-                              "url": self.url,
-                              "error": str(e), "fetched_at": self._meta.get("fetched_at", 0)}
+                # 失败: 保留上一版已生效公式; 无则退回默认。
+                # hash/version 始终反映实际生效的公式。
+                src = "cloud" if self._formula is not None else "default"
+                if self._formula is None:
+                    self._formula = DEFAULT_FORMULA
+                    self._raw = None
+                    self._hash = DEFAULT_FORMULA_HASH
+                    self._version = DEFAULT_FORMULA.get("version")
+                self._fallback = True
+                self._meta = {"source": src, "url": self.url, "error": str(e),
+                              "fetched_at": self._meta.get("fetched_at", 0),
+                              "enabled": True, "hash": self._hash,
+                              "version": self._version,
+                              "last_updated": self._meta.get("fetched_at", 0),
+                              "fallback": True}
         else:
+            self._formula = DEFAULT_FORMULA
+            self._raw = None
+            self._hash = DEFAULT_FORMULA_HASH
+            self._version = DEFAULT_FORMULA.get("version")
+            self._fallback = True
             self._meta = {"source": "default", "url": "", "error": None,
-                          "fetched_at": 0}
+                          "fetched_at": 0, "enabled": True,
+                          "hash": self._hash, "version": self._version,
+                          "last_updated": 0, "fallback": True}
         if self._formula is None:
             self._formula = DEFAULT_FORMULA
         return False
