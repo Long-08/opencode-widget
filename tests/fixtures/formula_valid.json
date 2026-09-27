@@ -1,0 +1,65 @@
+{
+  "version": 999,
+  "source_note": "test fixture - not a production formula",
+  "params": {
+    "meter": {
+      "ratio": 2.0,
+      "mode": "per_model",
+      "rates": {},
+      "rate_default": 2.0,
+      "rate_intercept": 0.25
+    },
+    "limits": {
+      "session": 10.0,
+      "weekly": 20.0,
+      "monthly": 40.0,
+      "credit_per_applied": 5.0
+    },
+    "windows": {
+      "session_ms": 1000,
+      "week_ms": 2000
+    },
+    "sources": {
+      "paid": ["go"],
+      "subset_of": {"gateway": "go"},
+      "label": {"go": "OpenCode Go"},
+      "order": ["go", "zen", "kilo", "router", "gateway"]
+    },
+    "free_models": {
+      "whitelist": ["big-pickle"],
+      "suffixes": ["-free", ":free", "/free"],
+      "exclude": ["openrouter/free", "kilo-auto/free", "openrouter-free"]
+    },
+    "providers": {
+      "src": {"opencode-go": "go"},
+      "prefixes": ["fixtureprov"],
+      "aliases": {"fixture-alias": "fixture-model"}
+    },
+    "prices": {
+      "test-model": {"in": 1.0, "out": 2.0, "cr": 0.1, "cw": null}
+    },
+    "model_quotas": {"test-model": 33.0},
+    "req_limits": {"test-model": [1, 2, 4]},
+    "tokens_per_req": {"test-model": 1000},
+    "display_names": {"test-model": "Test Model"},
+    "refresh": {"formula_s": 900}
+  },
+  "constants": {
+    "weeks_per_month": 4.0,
+    "periods_per_day": 5.0
+  },
+  "formulas": {
+    "tok_agg": {"display": "cloud tok_agg display", "expr": "fixture only"}
+  },
+  "views": [
+    {
+      "id": "all_today",
+      "label": "fixture view",
+      "scope": {"all": true},
+      "range": "today",
+      "group": null,
+      "agg": ["cost"],
+      "post": [{"op": "meterRatio", "on": "cost"}]
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "api_key": "PLACEHOLDER-NOT-A-REAL-KEY",
+  "server": {
+    "auth_cookie": "PLACEHOLDER-NOT-A-REAL-COOKIE",
+    "workspace_id": "wrk_PLACEHOLDER"
+  },
+  "calibration": {},
+  "subscription": {
+    "start": "2026-01-01T00:00:00"
+  },
+  "credit_deductions": [],
+  "formula_url": ""
+}
