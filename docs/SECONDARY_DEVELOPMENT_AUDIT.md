@@ -48,7 +48,7 @@ Phase-1 conclusions:
    touched without the new tests as protection. §10 documents each rule with official vs
    inferred provenance.
 
-No Phase-2 change was made. §20 is a plan only.
+Phase 2 Core (2A/2B/2C) has since been implemented on `dev/phase2-core` — see `docs/PHASE2_CORE_IMPLEMENTATION.md`; §20 remains the plan for the deferred phases (2D/2E/2F).
 
 ---
 
@@ -463,6 +463,8 @@ Isolation contract (enforced by `tests/conftest.py`, autouse):
 | G. formula | `tests/test_formula_system.py` | 16 | ✔ |
 | H. HTTP API | `tests/test_http_api.py` | 15 | ✔ |
 
+> **Phase 2 update:** the suite now has **140 tests** (Phase 2A/2B/2C additions); see `docs/PHASE2_CORE_IMPLEMENTATION.md` §11.
+
 Baseline result (2026-09-28, `main@37e399e`): **79 passed, 0 failed, 0 skipped**
 (`python -m pytest -o addopts="" -q`, TEMP redirected to an accessible dir; exit code 0).
 Characterization tests intentionally document current behavior that Phase 2 will change:
@@ -473,9 +475,13 @@ values, and `read_opencode_all()` returning `[]` on the current schema.
 
 ## 14. Security Findings
 
+> **Phase 2 status (updated 2026-09-28):** each finding below carries a status tag.
+> ✅ FIXED — addressed in Phase 2 Core · 🟡 PARTIAL — core risk removed, residual deferred · ⏸ DEFERRED — intentionally out of Phase 2 scope.
+> Implementation details: `docs/PHASE2_CORE_IMPLEMENTATION.md`.
+
 ### P0
 
-**P0-1 — Localhost API discloses auth cookie / API key to any web origin (CORS `*` + no auth)**
+**P0-1 — Localhost API discloses auth cookie / API key to any web origin (CORS `*` + no auth)** — ✅ FIXED (Phase 2A · `e2a2820`)
 
 - 位置: `data_server.py:581-590` (`_config_json`), `:635-644` (`_send_json` ACAO `*`),
   `:681-682` (`GET /api/config`), `:593-632` + `:759-760` (`POST /api/grab` returns cookie),
@@ -499,7 +505,7 @@ values, and `read_opencode_all()` returning `[]` on the current schema.
 
 ### P1
 
-**P1-1 — Electron renderer can read all secrets; no CSP; unescaped HTML sinks fed by cloud data**
+**P1-1 — Electron renderer can read all secrets; no CSP; unescaped HTML sinks fed by cloud data** — ✅ FIXED (Phase 2A · `f5305a7`)
 
 - 位置: `electron/main.js:241-290` (`grab-auth` returns cookie), `preload.js:3-13`,
   `index.html:1555-1572, 1590, 1745` (secrets into DOM), missing CSP in `index.html`,
@@ -520,7 +526,7 @@ values, and `read_opencode_all()` returning `[]` on the current schema.
 - 兼容性影响: renderer must stop relying on `/api/config` echoing secrets; UI flows for
   "show configured key/cookie" need redesign (masked display).
 
-**P1-2 — Secrets at rest in plaintext (`config.json`)**
+**P1-2 — Secrets at rest in plaintext (`config.json`)** — ✅ FIXED (Phase 2B · `909a704`)
 
 - 位置: `go-usage-widget.py:19, 321-333` (`CONFIG_PATH`, `load_config`, `save_config`);
   `data_server.py:732-742` (writes).
@@ -539,7 +545,7 @@ values, and `read_opencode_all()` returning `[]` on the current schema.
 
 ### P2
 
-**P2-1 — Remote formula trust: no signature/version pinning; cannot be disabled**
+**P2-1 — Remote formula trust: no signature/version pinning; cannot be disabled** — 🟡 PARTIAL (opt-out + hash + provenance: `e22dfc7`; signature/version pinning deferred)
 
 - 位置: `views.py:242-306`, `data_server.py:47-130, 133-153`, `cloud/build_worker.py`.
 - 问题: fetched formula is trusted data; no hash/signature/version pin; `formula_url: ""`
@@ -556,7 +562,7 @@ values, and `read_opencode_all()` returning `[]` on the current schema.
 - 修改复杂度: 小-中.
 - 兼容性影响: additive; default behavior unchanged.
 
-**P2-2 — Account split/dedup heuristics can misattribute usage**
+**P2-2 — Account split/dedup heuristics can misattribute usage** — ⏸ DEFERRED (billing heuristics intentionally untouched; regression-tested)
 
 - 位置: `data_server.py:464-497`; `usage_remote.py:449`; `server_data.py:367`.
 - 问题: raw model-string matching, ±120 s window, first-candidate bisect, non-go official
@@ -571,7 +577,7 @@ values, and `read_opencode_all()` returning `[]` on the current schema.
 - 修改复杂度: 小.
 - 兼容性影响: numbers may change (should become more accurate); document in release notes.
 
-**P2-3 — Local OpenCode reader silently returns zero rows on current schema**
+**P2-3 — Local OpenCode reader silently returns zero rows on current schema** — ✅ FIXED (Phase 2C · `0f88a7b`)
 
 - 位置: `go-usage-widget.py:406-450`.
 - 问题: queries `message` table that no longer exists in current OpenCode builds; exception
@@ -587,21 +593,21 @@ values, and `read_opencode_all()` returning `[]` on the current schema.
 
 ### P3
 
-**P3-1 — Browser-cookie DB copies left in `%TEMP%`**
+**P3-1 — Browser-cookie DB copies left in `%TEMP%`** — ⏸ DEFERRED
 `browser_cookie.py:258-288` copies the browser cookie DB to
 `%TEMP%\opencode\cookie_<hash>.db` and never deletes it. Values remain OS-encrypted; still a
 hygiene issue. Fix: delete after read / use in-memory temp; complexity: trivial.
 
-**P3-2 — Debug log growth**
+**P3-2 — Debug log growth** — ⏸ DEFERRED
 `electron/main.js:7-10` appends window-position logs to `%TEMP%\widget_snap.log` without
 rotation (marked "临时诊断"). Fix: remove or rotate; complexity: trivial.
 
-**P3-3 — Missing Electron hardening flags**
+**P3-3 — Missing Electron hardening flags** — 🟡 PARTIAL (sandbox + navigation guards: `f5305a7`; devtools flag deferred)
 No `sandbox: true`, devtools not disabled, no `setWindowOpenHandler` on either window
 (`main.js:149-168, 251-264`). Low direct impact given `contextIsolation`; fix during any
 Electron work; complexity: small.
 
-**P3-4 — No rotation/retention for widget-owned DBs**
+**P3-4 — No rotation/retention for widget-owned DBs** — ⏸ DEFERRED
 `usage_remote.db` grows unbounded (`quota_snapshot` appends on every sync; 1800 s cadence →
 ~48 rows/day). Housekeeping suggestion; complexity: small.
 
@@ -658,6 +664,8 @@ Electron work; complexity: small.
 ---
 
 ## 17. Agent-level Usage Feasibility
+
+> **Phase 2C update:** a current-schema reader (`session_message`/`session_v2`) and the raw `/api/agents` backend now exist; see `docs/PHASE2_CORE_IMPLEMENTATION.md` §6–§9.
 
 **Can agents be reliably identified? Yes — on current OpenCode schemas.** Evidence:
 
