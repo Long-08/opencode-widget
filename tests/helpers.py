@@ -150,28 +150,37 @@ def current_assistant_message(
 # --------------------------------------------------------------------------
 # HTTP helpers (only against the ephemeral test server)
 # --------------------------------------------------------------------------
-def http_get(url, timeout=10):
-    req = urllib.request.Request(url, method="GET")
+def auth_headers(token, extra=None):
+    """Phase 2A: build the Bearer auth header for the hardened localhost API."""
+    headers = {"Authorization": f"Bearer {token}"}
+    if extra:
+        headers.update(extra)
+    return headers
+
+
+def http_get(url, timeout=10, headers=None):
+    req = urllib.request.Request(url, method="GET", headers=headers or {})
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         body = resp.read().decode("utf-8", errors="replace")
         return resp.status, body
 
 
-def http_post_json(url, payload, timeout=10):
+def http_post_json(url, payload, timeout=10, headers=None):
     data = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(
-        url, data=data, method="POST", headers={"Content-Type": "application/json"}
-    )
+    req_headers = {"Content-Type": "application/json"}
+    if headers:
+        req_headers.update(headers)
+    req = urllib.request.Request(url, data=data, method="POST", headers=req_headers)
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         body = resp.read().decode("utf-8", errors="replace")
         return resp.status, body
 
 
-def http_get_json(url, timeout=10):
-    status, body = http_get(url, timeout=timeout)
+def http_get_json(url, timeout=10, headers=None):
+    status, body = http_get(url, timeout=timeout, headers=headers)
     return status, json.loads(body)
 
 
-def http_post_json_response(url, payload, timeout=10):
-    status, body = http_post_json(url, payload, timeout=timeout)
+def http_post_json_response(url, payload, timeout=10, headers=None):
+    status, body = http_post_json(url, payload, timeout=timeout, headers=headers)
     return status, json.loads(body)

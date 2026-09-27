@@ -130,6 +130,16 @@ def isolated_state(gw, monkeypatch, tmp_path):
     monkeypatch.setattr(ds_gw, "read_auth_cookie_from_webdata", lambda: "")
     ds_rules = _snapshot(ds_gw, GW_RULE_GLOBALS)
 
+    # Phase 2A: redirect the runtime-info file directory into tmp_path. monkeypatch
+    # restores the previous env value automatically after each test.
+    monkeypatch.setenv("OPENCODE_WIDGET_RUNTIME_DIR", str(tmp_path / "runtime"))
+
+    # Phase 2A: deterministic per-test formula store (config changes rebuild it).
+    import views as vw
+
+    monkeypatch.setattr(ds, "_FORMULA_STORE", vw.FormulaStore(url=""))
+    monkeypatch.setattr(ds, "_FORMULA_ENGINE", None)
+
     # --- remote / server DB paths ---
     import server_data as sd
     import usage_remote as ur
@@ -170,10 +180,13 @@ def isolated_state(gw, monkeypatch, tmp_path):
 
 
 @pytest.fixture()
-def api_server(data_server):
+def api_server(data_server, monkeypatch):
     """Run data_server.Handler on an ephemeral 127.0.0.1 port (no production ports)."""
     from http.server import ThreadingHTTPServer
 
+    # Phase 2A: pin the runtime token so tests can authenticate. The base URL is
+    # still yielded as a plain string to limit churn in callers.
+    monkeypatch.setattr(data_server, "_TOKEN", "test-runtime-token")
     srv = ThreadingHTTPServer(("127.0.0.1", 0), data_server.Handler)
     port = srv.server_address[1]
     thread = threading.Thread(target=srv.serve_forever, daemon=True)
@@ -184,3 +197,9 @@ def api_server(data_server):
         srv.shutdown()
         srv.server_close()
         thread.join(timeout=5)
+
+
+@pytest.fixture()
+def api_token():
+    """Phase 2A: the exact token installed by the api_server fixture."""
+    return "test-runtime-token"
