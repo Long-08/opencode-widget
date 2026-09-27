@@ -225,9 +225,9 @@ def build_state():
         pass
     applied_credits = _applied_credits()
     try:
-        rows, cost_map = _collect_rows()
+        rows, cost_map, reader_meta = _collect_rows()
     except Exception:
-        rows, cost_map = [], {}
+        rows, cost_map, reader_meta = [], {}, {}
     # 最早付费消费时间: 订阅日合理性校验用 (订阅后才会消费)
     earliest_ms = min((r["ts"] for r in rows if r.get("cost")), default=0)
     period_start = _subscription_start(earliest_ms)
@@ -356,6 +356,7 @@ def build_state():
         "other_cost": other_cost,
         "server_error": None,
         "server_configured": bool(srv_cfg.get("auth_cookie")) or bool(srv),
+        "reader": reader_meta,
         "ts": now_ms,
     }
 
@@ -564,10 +565,11 @@ def _collect_rows():
         except Exception:
             remote_rows = []
             cost_map = {}
+    reader_meta = {}
     if remote_rows:
-        local_rows = gw.read_opencode_all()
+        local_rows, reader_meta = gw.read_opencode_usage()
         extra = _split_own_other(local_rows, remote_rows)
-        return remote_rows + extra, cost_map
+        return remote_rows + extra, cost_map, reader_meta
 
     srv_rows = []
     if sd is not None:
@@ -582,10 +584,10 @@ def _collect_rows():
                 cost_map = sd.read_cost_map()
             except Exception:
                 pass
-        local_rows = gw.read_opencode_all()
+        local_rows, reader_meta = gw.read_opencode_usage()
         extra = _split_own_other(local_rows, srv_rows)
-        return srv_rows + extra, cost_map
-    go_rows = gw.read_opencode_all()
+        return srv_rows + extra, cost_map, reader_meta
+    go_rows, reader_meta = gw.read_opencode_usage()
     try:
         cfg = gw.load_config()
         last_id = cfg.get("codex_log_id") or 0
@@ -602,7 +604,7 @@ def _collect_rows():
     # 未登录/无官方数据: 全本地, 全归 other
     for r in go_rows:
         r["account"] = "other"
-    return go_rows + cx_rows, {}
+    return go_rows + cx_rows, {}, reader_meta
 
 
 def do_sync():
@@ -847,10 +849,34 @@ class Handler(BaseHTTPRequestHandler):
         elif path.startswith("/api/view/"):
             vid = urllib.parse.unquote(path[len("/api/view/"):])
             try:
-                rows, _ = _collect_rows()
+                rows, _, _ = _collect_rows()
                 _send_json(self, run_view(vid, rows))
             except vw.FormulaError as e:
                 _send_json(self, {"ok": False, "error": str(e)}, 404)
+            except Exception as e:
+                _send_json(self, {"ok": False, "error": repr(e)}, 500)
+        elif path == "/api/agents":
+            q = urllib.parse.parse_qs(self.path.split("?")[1]) if "?" in self.path else {}
+            rng = (q.get("range", ["all"])[0] or "all").lower()
+            if rng not in ("today", "7d", "30d", "all"):
+                rng = "all"
+            try:
+                get_formula()
+                rows, meta = gw.read_opencode_usage()
+                earliest = min((r["ts"] for r in rows if (r.get("cost") or 0) > 0), default=0)
+                period_start = _subscription_start(earliest)
+                with _FORMULA_LOCK:
+                    engine = _FORMULA_ENGINE
+                    if engine is not None:
+                        engine.period_start_ms = period_start
+                # 复用 ViewEngine 的 range 截止机制, 不新写日期算法
+                cutoff = engine._cutoff(rng) if engine is not None else None
+                groups = gw.load_config().get("agent_groups") or {}
+                _send_json(self, {
+                    "reader": meta,
+                    "range": rng,
+                    "agents": gw.agent_stats(rows, cutoff=cutoff, agent_groups=groups),
+                })
             except Exception as e:
                 _send_json(self, {"ok": False, "error": repr(e)}, 500)
         else:
