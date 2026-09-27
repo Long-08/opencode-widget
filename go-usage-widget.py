@@ -403,14 +403,64 @@ def est_cost(model, tokens):
     return cost / 1_000_000
 
 
-def read_opencode_all(srcs=None):
+def detect_opencode_schema(db_path=None):
+    """探测 opencode.db 的 schema 版本 (只读)。
+
+    db_path 缺省时在调用时读取模块全局 OPENCODE_DB (测试会 monkeypatch)。
+    返回 {"schema", "status", "error", "tables"}:
+      schema: legacy | current | unsupported | missing
+      status: ok | missing_db | unsupported_schema | error
+    "current" 需同时存在 session_message 与 session_v2; 若 legacy message 也在则
+    优先 current 并附 legacy_also_present=True。错误信息只带异常类型, 不含路径/数据。
+    """
+    path = db_path if db_path is not None else OPENCODE_DB
+    result = {"schema": "unsupported", "status": "ok", "error": None, "tables": []}
+    if not os.path.exists(path):
+        result["schema"] = "missing"
+        result["status"] = "missing_db"
+        return result
+    try:
+        conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=15)
+        try:
+            cur = conn.execute("select name from sqlite_master where type='table'")
+            tables = [r[0] for r in cur]
+        finally:
+            conn.close()
+    except Exception as e:
+        result["status"] = "error"
+        result["error"] = type(e).__name__
+        return result
+    result["tables"] = tables
+    tset = set(tables)
+    has_current = "session_message" in tset and "session_v2" in tset
+    has_legacy = "message" in tset
+    if has_current:
+        result["schema"] = "current"
+        if has_legacy:
+            result["legacy_also_present"] = True
+    elif has_legacy:
+        result["schema"] = "legacy"
+    else:
+        result["schema"] = "unsupported"
+        result["status"] = "unsupported_schema"
+    return result
+
+
+def read_legacy_usage(db_path=None, srcs=None):
+    """Legacy schema (`message` 表) 读取器: 返回 (rows, skipped)。
+
+    保留原 read_opencode_all 的语义不变 (注入语义, 未知 providerID 原样保留,
+    缺 providerID/time.created 的行跳过)。额外补规范化字段。
+    """
     rows = []
-    if not os.path.exists(OPENCODE_DB):
-        return rows
+    skipped = 0
+    path = db_path if db_path is not None else OPENCODE_DB
+    if not os.path.exists(path):
+        return rows, skipped
     if srcs:
         srcs = set(srcs)
     try:
-        conn = sqlite3.connect(f"file:{OPENCODE_DB}?mode=ro", uri=True, timeout=15)
+        conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=15)
         cur = conn.execute(
             "select data from message where json_valid(data) "
             "and json_extract(data,'$.role')='assistant'"
@@ -419,9 +469,11 @@ def read_opencode_all(srcs=None):
             try:
                 d = json.loads(data)
             except Exception:
+                skipped += 1
                 continue
             pid = d.get("providerID")
             if not pid:
+                skipped += 1
                 continue
             # 动态供应商: 已知映射换成简名, 未知 providerID 原样保留 (自动发现新供应商)
             src = PROVIDER_SRC.get(pid) or pid
@@ -430,24 +482,220 @@ def read_opencode_all(srcs=None):
                 continue
             t = (d.get("time") or {}).get("created")
             if not t:
+                skipped += 1
                 continue
             t_completed = (d.get("time") or {}).get("completed")
             cost = d.get("cost")
             dur_ms = None
             if isinstance(t_completed, (int, float)) and t_completed > int(t):
                 dur_ms = int(t_completed) - int(t)
+            model_id = d.get("modelID") or "?"
             rows.append({
                 "ts": int(t),
                 "cost": float(cost) if isinstance(cost, (int, float)) else 0.0,
-                "model": d.get("modelID") or "?",
+                "model": model_id,
                 "tokens": d.get("tokens") or {},
                 "src": src,
                 "dur_ms": dur_ms,
+                "agent": None,
+                "session_id": None,
+                "parent_session_id": None,
+                "provider_id": pid,
+                "model_id": model_id,
+                "variant": None,
             })
         conn.close()
     except Exception:
         pass
+    return rows, skipped
+
+
+def _normalize_tokens(raw):
+    """把 tokens 规整为 {input, output, reasoning, cache:{read, write}} (缺失 -> 0)。"""
+    raw = raw if isinstance(raw, dict) else {}
+    cache = raw.get("cache") if isinstance(raw.get("cache"), dict) else {}
+    return {
+        "input": raw.get("input") or 0,
+        "output": raw.get("output") or 0,
+        "reasoning": raw.get("reasoning") or 0,
+        "cache": {"read": cache.get("read") or 0, "write": cache.get("write") or 0},
+    }
+
+
+def read_current_usage(db_path=None, srcs=None):
+    """Current schema (`session_message` + `session_v2`) 读取器: 返回 (rows, skipped)。"""
+    rows = []
+    skipped = 0
+    path = db_path if db_path is not None else OPENCODE_DB
+    if not os.path.exists(path):
+        return rows, skipped
+    if srcs:
+        srcs = set(srcs)
+    try:
+        conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=15)
+        sessions = {}
+        for sid, parent_id, agent in conn.execute(
+            "select id, parent_id, agent from session_v2"
+        ):
+            sessions[sid] = {"parent_id": parent_id, "agent": agent}
+        cur = conn.execute(
+            "select session_id, data from session_message "
+            "where type='assistant' and json_valid(data)"
+        )
+        for session_id, data in cur:
+            try:
+                d = json.loads(data)
+            except Exception:
+                skipped += 1
+                continue
+            if not isinstance(d, dict):
+                skipped += 1
+                continue
+            model = d.get("model")
+            if isinstance(model, str):
+                try:
+                    model = json.loads(model)
+                except Exception:
+                    model = {}
+            if not isinstance(model, dict):
+                model = {}
+            provider_id = model.get("providerID")
+            if not provider_id:
+                skipped += 1
+                continue
+            src = PROVIDER_SRC.get(provider_id) or provider_id
+            register_provider_prefix(provider_id)
+            if srcs is not None and src not in srcs:
+                continue
+            t = (d.get("time") or {}).get("created")
+            if not t:
+                skipped += 1
+                continue
+            t_completed = (d.get("time") or {}).get("completed")
+            cost = d.get("cost")
+            dur_ms = None
+            if isinstance(t_completed, (int, float)) and t_completed > int(t):
+                dur_ms = int(t_completed) - int(t)
+            sess = sessions.get(session_id) or {}
+            model_id = model.get("id") or "?"
+            rows.append({
+                "ts": int(t),
+                "cost": float(cost) if isinstance(cost, (int, float)) else 0.0,
+                "model": model_id,
+                "tokens": _normalize_tokens(d.get("tokens")),
+                "src": src,
+                "dur_ms": dur_ms,
+                # 消息级 agent 优先, 其次会话级; 缺失不丢行
+                "agent": d.get("agent") or sess.get("agent") or None,
+                "session_id": session_id,
+                "parent_session_id": sess.get("parent_id"),
+                "provider_id": provider_id,
+                "model_id": model_id,
+                "variant": model.get("variant"),
+            })
+        conn.close()
+    except Exception:
+        pass
+    return rows, skipped
+
+
+def read_opencode_usage(srcs=None, db_path=None):
+    """探测 schema 并分派到对应读取器, 返回 (rows, meta)。
+
+    meta: {schema, status, row_count, skipped_rows, error} (+ legacy_also_present)。
+    绝不向调用方抛异常; unsupported/missing 返回显式 status 的空结果。
+    """
+    meta = {"schema": None, "status": None, "row_count": 0, "skipped_rows": 0, "error": None}
+    try:
+        det = detect_opencode_schema(db_path)
+    except Exception as e:
+        meta.update({"schema": "unsupported", "status": "error", "error": type(e).__name__})
+        return [], meta
+    meta["schema"] = det.get("schema")
+    meta["status"] = det.get("status")
+    meta["error"] = det.get("error")
+    if det.get("legacy_also_present"):
+        meta["legacy_also_present"] = True
+    if det.get("schema") == "current":
+        rows, skipped = read_current_usage(db_path=db_path, srcs=srcs)
+    elif det.get("schema") == "legacy":
+        rows, skipped = read_legacy_usage(db_path=db_path, srcs=srcs)
+    else:
+        return [], meta
+    meta["row_count"] = len(rows)
+    meta["skipped_rows"] = skipped
+    return rows, meta
+
+
+def read_opencode_all(srcs=None):
+    """兼容旧调用方: 只返回 rows。"""
+    rows, _meta = read_opencode_usage(srcs=srcs)
     return rows
+
+
+def agent_stats(rows, cutoff=None, agent_groups=None):
+    """按 agent 聚合原始统计。cutoff 为本地时区 YYYY-MM-DD (day(ts) >= cutoff)。
+
+    未知 agent 名原样保留 (None -> "unknown"); group 映射缺失 -> "unmapped"。
+    """
+    agent_groups = agent_groups or {}
+
+    def _blank_tokens():
+        return {"total": 0, "input": 0, "output": 0, "cache_read": 0, "cache_write": 0}
+
+    buckets = {}
+    for r in rows:
+        agent = r.get("agent") or "unknown"
+        if cutoff:
+            day = datetime.fromtimestamp(r["ts"] / 1000, LOCAL_TZ).strftime("%Y-%m-%d")
+            if day < cutoff:
+                continue
+        b = buckets.get(agent)
+        if b is None:
+            b = buckets[agent] = {"requests": 0, "cost": 0.0,
+                                  "tokens": _blank_tokens(), "models": {}}
+        cost = r.get("cost") or 0.0
+        tk = r.get("tokens") or {}
+        cache = tk.get("cache") if isinstance(tk.get("cache"), dict) else {}
+        inp = tk.get("input") or 0
+        out = tk.get("output") or 0
+        cr = cache.get("read") or 0
+        cw = cache.get("write") or 0
+        b["requests"] += 1
+        b["cost"] += cost
+        b["tokens"]["input"] += inp
+        b["tokens"]["output"] += out
+        b["tokens"]["cache_read"] += cr
+        b["tokens"]["cache_write"] += cw
+        b["tokens"]["total"] += inp + out + cr + cw
+        # 模型细分 (model, provider, variant)
+        model_id = r.get("model") or "?"
+        key = (model_id, r.get("provider_id"), r.get("variant"))
+        m = b["models"].get(key)
+        if m is None:
+            m = b["models"][key] = {"model": model_id, "provider": r.get("provider_id"),
+                                    "variant": r.get("variant"), "requests": 0,
+                                    "cost": 0.0, "tokens": _blank_tokens()}
+        m["requests"] += 1
+        m["cost"] += cost
+        m["tokens"]["input"] += inp
+        m["tokens"]["output"] += out
+        m["tokens"]["cache_read"] += cr
+        m["tokens"]["cache_write"] += cw
+        m["tokens"]["total"] += inp + out + cr + cw
+    out = []
+    for agent, b in buckets.items():
+        models = sorted(b["models"].values(), key=lambda x: x["cost"], reverse=True)
+        out.append({
+            "agent": agent,
+            "requests": b["requests"],
+            "cost": b["cost"],
+            "tokens": b["tokens"],
+            "group": agent_groups.get(agent) or "unmapped",
+            "models": models,
+        })
+    out.sort(key=lambda x: x["cost"], reverse=True)
+    return out
 
 
 def read_codex_logs(cursor):

@@ -58,20 +58,29 @@ def test_read_opencode_all_legacy_schema(gw, monkeypatch, tmp_path):
     assert second["dur_ms"] is None  # no completed timestamp
 
 
-def test_read_opencode_all_current_schema_is_unsupported(gw, monkeypatch, tmp_path):
-    """Characterization test for a known gap (see audit).
-
-    The current production reader (gw.read_opencode_all) only queries the legacy
-    `message` table. Databases using the current session_message / session_v2
-    schema therefore yield no rows. This test documents that gap and MUST be
-    updated when the reader is upgraded to the current schema.
-    """
+def test_read_opencode_all_current_schema_returns_rows(gw, monkeypatch, tmp_path):
+    # Phase 2C: current schema is now supported (was a documented gap)
     db = helpers.build_current_opencode_db(
         tmp_path / "opencode.db",
         [{"data": helpers.current_assistant_message(created=1000)}],
+        sessions=[{"id": "ses_1", "parent_id": None, "agent": "build"}],
     )
     monkeypatch.setattr(gw, "OPENCODE_DB", str(db))
-    assert gw.read_opencode_all() == []
+
+    rows = gw.read_opencode_all()
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["ts"] == 1000
+    assert row["model"] == "deepseek-v4.1-flash"
+    assert row["model_id"] == "deepseek-v4.1-flash"
+    assert row["provider_id"] == "opencode-go"
+    assert row["src"] == "go"
+    assert row["agent"] == "build"
+    assert row["session_id"] == "ses_1"
+    assert row["variant"] == "high"
+    assert row["cost"] == pytest.approx(1.0)
+    assert row["tokens"] == helpers.default_tokens()
+    assert row["dur_ms"] == 1000
 
 
 # --------------------------------------------------------------------------

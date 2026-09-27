@@ -93,11 +93,13 @@ def build_legacy_opencode_db(path, messages):
     return str(path)
 
 
-def build_current_opencode_db(path, messages):
+def build_current_opencode_db(path, messages, sessions=None):
     """Create a disposable opencode.db with the CURRENT schema subset
     (session_message + session_v2) that includes per-message `agent`.
 
-    messages: list of dicts accepted by current_message().
+    messages: list of dicts accepted by current_assistant_message().
+    sessions: optional list of dicts {id, parent_id, agent, model} written into
+              session_v2 (model is stored as a JSON string when provided).
     """
     con = sqlite3.connect(str(path))
     try:
@@ -112,6 +114,17 @@ def build_current_opencode_db(path, messages):
             " id TEXT PRIMARY KEY, session_id TEXT, type TEXT, seq INTEGER,"
             " time_created INTEGER, time_updated INTEGER, data TEXT)"
         )
+        for sess in (sessions or []):
+            con.execute(
+                "INSERT OR REPLACE INTO session_v2 (id, parent_id, agent, model)"
+                " VALUES (?,?,?,?)",
+                (
+                    sess.get("id"),
+                    sess.get("parent_id"),
+                    sess.get("agent"),
+                    json.dumps(sess["model"]) if sess.get("model") is not None else None,
+                ),
+            )
         for i, msg in enumerate(messages):
             sid = msg.get("session_id", "ses_1")
             con.execute(
@@ -134,16 +147,35 @@ def build_current_opencode_db(path, messages):
 
 
 def current_assistant_message(
-    created, agent="build", model_id="deepseek-v4.1-flash", provider_id="opencode-go", cost=1.0
+    created,
+    agent="build",
+    model_id="deepseek-v4.1-flash",
+    provider_id="opencode-go",
+    cost=1.0,
+    model=None,
+    variant="high",
+    completed=None,
+    tokens=None,
 ):
-    """One session_message row's `data` payload in the current schema."""
+    """One session_message row's `data` payload in the current schema.
+
+    `model` (dict) overrides the auto-built model object when provided;
+    `completed` defaults to created+1000 (pass an int, or False to omit).
+    """
+    if model is None:
+        model = {"id": model_id, "providerID": provider_id, "variant": variant}
+    time = {"created": int(created)}
+    if completed is None:
+        time["completed"] = int(created) + 1000
+    elif completed is not False:
+        time["completed"] = int(completed)
     return {
-        "time": {"created": int(created), "completed": int(created) + 1000},
+        "time": time,
         "agent": agent,
-        "model": {"id": model_id, "providerID": provider_id, "variant": "high"},
+        "model": model,
         "content": [],
         "cost": cost,
-        "tokens": default_tokens(),
+        "tokens": tokens if tokens is not None else default_tokens(),
     }
 
 
