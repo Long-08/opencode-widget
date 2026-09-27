@@ -179,6 +179,31 @@ def isolated_state(gw, monkeypatch, tmp_path):
     fr._FORMULA_META = fr_meta
 
 
+@pytest.fixture(autouse=True)
+def isolated_secret_store(monkeypatch, tmp_path):
+    """Phase 2B: deterministic secret backend + per-test secret file.
+
+    Always active (autouse) so no test ever touches real DPAPI / credential
+    storage. The fake backend is a reversible transform used only in tests.
+    """
+    import secret_store
+
+    class _FakeBackend:
+        def encrypt(self, data):
+            return bytes(b ^ 0x5A for b in data)
+
+        def decrypt(self, data):
+            return bytes(b ^ 0x5A for b in data)
+
+    previous = secret_store.get_backend()
+    secret_store.set_backend(_FakeBackend())
+    monkeypatch.setenv("OPENCODE_WIDGET_SECRET_FILE", str(tmp_path / "secrets.enc"))
+    try:
+        yield
+    finally:
+        secret_store.set_backend(previous)
+
+
 @pytest.fixture()
 def api_server(data_server, monkeypatch):
     """Run data_server.Handler on an ephemeral 127.0.0.1 port (no production ports)."""

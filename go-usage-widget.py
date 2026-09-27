@@ -11,6 +11,7 @@ from datetime import datetime, timezone, timedelta
 from urllib.request import Request, urlopen
 
 import formula_registry as fr
+import secret_store
 
 # 日期聚合统一用系统本地时区 (数据时间戳为 UTC, 用户在北京时间看"今天"需按本地边界)
 LOCAL_TZ = datetime.now().astimezone().tzinfo
@@ -318,19 +319,118 @@ def norm_model(model):
     return MODEL_ALIASES.get(m, m)
 
 
+def _plaintext_secrets(cfg):
+    """(api_key, auth_cookie) still present as plaintext in config.json."""
+    if not isinstance(cfg, dict):
+        return "", ""
+    api_key = str(cfg.get("api_key") or "").strip()
+    srv = cfg.get("server")
+    cookie = ""
+    if isinstance(srv, dict):
+        cookie = str(srv.get("auth_cookie") or "").strip()
+    return api_key, cookie
+
+
+def _strip_secret_fields(cfg):
+    """Return a copy of cfg without api_key / server.auth_cookie."""
+    out = dict(cfg)
+    out.pop("api_key", None)
+    srv = out.get("server")
+    if isinstance(srv, dict):
+        srv = dict(srv)
+        srv.pop("auth_cookie", None)
+        out["server"] = srv
+    return out
+
+
 def load_config():
+    cfg = {}
     if os.path.exists(CONFIG_PATH):
         try:
             with open(CONFIG_PATH, "r", encoding="utf-8-sig") as f:
-                return json.load(f)
+                cfg = json.load(f)
         except Exception:
-            pass
-    return {}
+            cfg = {}
+    if not isinstance(cfg, dict):
+        cfg = {}
+
+    # Phase 2B: load stored secrets. Unavailable/corrupt store -> compat mode:
+    # never migrate, never overwrite anything, just return plaintext config.
+    store_ok = False
+    stored = {}
+    try:
+        if secret_store.store_available():
+            stored = secret_store.load_secrets()
+            store_ok = True
+    except secret_store.SecretStoreError:
+        store_ok = False
+
+    api_key, cookie = _plaintext_secrets(cfg)
+
+    # Fail-safe migration: plaintext secrets in config.json move into the store
+    # only after a verified write; on any failure config.json is left untouched.
+    if store_ok and (api_key or cookie):
+        try:
+            merged = dict(stored)
+            if api_key:
+                merged["api_key"] = api_key
+            if cookie:
+                merged["auth_cookie"] = cookie
+            secret_store.save_secrets(merged)
+            verify = secret_store.load_secrets()
+            if (api_key and verify.get("api_key") != api_key) or (
+                cookie and verify.get("auth_cookie") != cookie
+            ):
+                raise secret_store.SecretStoreError("secret store verify failed")
+            with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+                json.dump(_strip_secret_fields(cfg), f, ensure_ascii=False, indent=2)
+            stored = verify
+            cfg = _strip_secret_fields(cfg)
+        except Exception:
+            pass  # leave config.json untouched, keep returning plaintext values
+
+    # Merge stored secrets back into the returned dict (shape stays identical).
+    if store_ok and stored:
+        stored_key = str(stored.get("api_key") or "")
+        stored_cookie = str(stored.get("auth_cookie") or "")
+        if stored_key:
+            cfg["api_key"] = stored_key
+        if stored_cookie:
+            srv = cfg.get("server")
+            if not isinstance(srv, dict):
+                srv = {}
+                cfg["server"] = srv
+            srv["auth_cookie"] = stored_cookie
+    return cfg
 
 
 def save_config(cfg):
+    if not isinstance(cfg, dict):
+        cfg = {}
+    api_key, cookie = _plaintext_secrets(cfg)
+
+    # Phase 2B: persist secrets in the encrypted store when possible; otherwise
+    # fall back to plaintext config.json (compat mode, no data loss).
+    store_ok = False
+    if secret_store.store_available():
+        try:
+            stored = secret_store.load_secrets()
+            if api_key:
+                stored["api_key"] = api_key
+            else:
+                stored.pop("api_key", None)
+            if cookie:
+                stored["auth_cookie"] = cookie
+            else:
+                stored.pop("auth_cookie", None)
+            secret_store.save_secrets(stored)
+            store_ok = True
+        except secret_store.SecretStoreError:
+            store_ok = False
+
+    out = _strip_secret_fields(cfg) if store_ok else cfg
     with open(CONFIG_PATH, "w", encoding="utf-8") as f:
-        json.dump(cfg, f, ensure_ascii=False, indent=2)
+        json.dump(out, f, ensure_ascii=False, indent=2)
 
 
 def read_auth_cookie_from_webdata():
