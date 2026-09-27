@@ -2,10 +2,12 @@
 webdata/
 logs/
 __pycache__/
+.pytest_cache/
 *.log
 server_usage.db
 usage_remote.db
 config.json
+secrets.enc
 
 # 第三方依赖库（本地打包的 pywebview/pythonnet 等，不纳入版本控制）
 pylib/
