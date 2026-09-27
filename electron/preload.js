@@ -5,6 +5,7 @@ contextBridge.exposeInMainWorld('widgetAPI', {
   openLogin: () => ipcRenderer.invoke('open-login'),
   grabAuth: () => ipcRenderer.invoke('grab-auth'),
   saveUiState: (s) => ipcRenderer.invoke('save-ui-state', s),
+  apiEnv: () => ipcRenderer.invoke('api-env'),
   onSnapSmall: (cb) => ipcRenderer.on('snap-small', () => cb()),
   onSnapRestore: (cb) => ipcRenderer.on('snap-restore', (_e, s) => cb(s)),
   setClickThrough: (enabled, headerH) => ipcRenderer.invoke('set-click-through', enabled, headerH),

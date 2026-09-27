@@ -25,6 +25,37 @@ async function readAuthCookieFromSession(ses) {
   } catch (_) { return ''; }
 }
 
+// server 写入的 runtime.json：目录 = OPENCODE_WIDGET_RUNTIME_DIR 或 os.tmpdir()/opencode-widget
+// 内容 {token, port, pid, created}。启动后稍晚才出现，故带重试。
+const RUNTIME_TIMEOUT_MS = 10000;
+const RUNTIME_INTERVAL_MS = 250;
+function runtimeFilePath() {
+  const dir = process.env.OPENCODE_WIDGET_RUNTIME_DIR || path.join(os.tmpdir(), 'opencode-widget');
+  return path.join(dir, 'runtime.json');
+}
+function readRuntimeOnce() {
+  try {
+    const j = JSON.parse(fs.readFileSync(runtimeFilePath(), 'utf8'));
+    if (j && j.port) return { base: 'http://127.0.0.1:' + j.port, token: j.token || '' };
+  } catch (_) { /* 尚未生成或损坏，继续重试 */ }
+  return null;
+}
+function readRuntimeEnv() {
+  const now = readRuntimeOnce();
+  if (now) return Promise.resolve(now);
+  return new Promise((resolve) => {
+    const started = Date.now();
+    const timer = setInterval(() => {
+      const r = readRuntimeOnce();
+      if (r) { clearInterval(timer); resolve(r); return; }
+      if (Date.now() - started >= RUNTIME_TIMEOUT_MS) {
+        clearInterval(timer);
+        resolve({ base: '', token: '' });
+      }
+    }, RUNTIME_INTERVAL_MS);
+  });
+}
+
 const SIZES = {
   small: [540, 260],
   mid: [560, 480],
@@ -164,10 +195,15 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: true,
     },
   });
 
   win.loadFile(path.join(__dirname, 'app', 'index.html'));
+
+  // 安全加固：悬浮窗不允许任何导航或弹窗（内容全部来自本地文件）
+  win.webContents.on('will-navigate', (event) => { event.preventDefault(); });
+  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
 
   // 吸顶：窗口顶边靠近屏幕工作区顶部时贴齐并通知前端切小屏
   const born = Date.now();
@@ -237,7 +273,11 @@ ipcMain.handle('open-login', async () => {
   }
 });
 
+// 渲染层获取本地 API 基址与 runtime token（用于对所有 /api/* 附带 Bearer 鉴权）
+ipcMain.handle('api-env', () => readRuntimeEnv());
+
 // 应用内登录窗口：自动抓取 auth cookie + workspace_id（替代 F12 手动复制）
+// 抓取后由主进程直接 POST 到本地 server（携带 runtime token），渲染层只拿到配置状态。
 ipcMain.handle('grab-auth', async () => {
   // 若已有有效登录态（分区 cookie + 自动重定向）则直接捕获，无需用户操作；
   // 否则停留在登录页等用户登录后捕获。同一分区持久化，下次免登录。
@@ -245,6 +285,7 @@ ipcMain.handle('grab-auth', async () => {
   const ses = session.fromPartition(LOGIN_PARTITION);
   return new Promise((resolve) => {
     let settled = false;
+    let capturing = false;
     let poll = null;
     const stopPoll = () => { if (poll) { clearInterval(poll); poll = null; } };
     const settle = (r) => { if (!settled) { settled = true; stopPoll(); resolve(r); } };
@@ -260,9 +301,15 @@ ipcMain.handle('grab-auth', async () => {
         session: ses,
         contextIsolation: true,
         nodeIntegration: false,
+        sandbox: true,
       },
     });
     loginWin.loadURL(opencodeAuthUrl());
+    // 安全加固：登录窗口只允许在 opencode.ai 内导航，新窗口一律拒绝
+    loginWin.webContents.on('will-navigate', (event, url) => {
+      if (!/^https:\/\/opencode\.ai(\/|$)/.test(url)) event.preventDefault();
+    });
+    loginWin.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
     loginWin.on('closed', () => {
       stopPoll();
       loginWin = null;
@@ -270,16 +317,43 @@ ipcMain.handle('grab-auth', async () => {
     });
 
     const tryCapture = async () => {
-      if (settled || !loginWin || loginWin.isDestroyed()) return;
+      if (settled || capturing || !loginWin || loginWin.isDestroyed()) return;
+      const url = loginWin.webContents.getURL();
+      const m = /\/workspace\/(wrk_[A-Za-z0-9]+)/.exec(url);
+      if (!m) return;
+      capturing = true;
+      let cookie = '';
+      try { cookie = await readAuthCookieFromSession(ses); } catch (_) { cookie = ''; }
+      if (!cookie) { capturing = false; return; }
+      // 交给主进程提交，cookie/workspace 绝不经 IPC 返回渲染层
       try {
-        const url = loginWin.webContents.getURL();
-        const m = /\/workspace\/(wrk_[A-Za-z0-9]+)/.exec(url);
-        if (!m) return;
-        const cookie = await readAuthCookieFromSession(ses);
-        if (!cookie) return;
-        settle({ ok: true, auth_cookie: cookie, workspace_id: m[1] });
-        setTimeout(() => { if (loginWin && !loginWin.isDestroyed()) loginWin.close(); }, 300);
-      } catch (_) { /* 继续等待 */ }
+        const env = await readRuntimeEnv();
+        if (!env.base) {
+          settle({ ok: false, error: '本地服务未就绪（runtime.json 未找到）' });
+        } else {
+          const resp = await fetch(env.base + '/api/server', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer ' + env.token,
+            },
+            body: JSON.stringify({ auth_cookie: cookie, workspace_id: m[1] }),
+          });
+          const data = await resp.json().catch(() => ({}));
+          if (data && data.ok) {
+            settle({
+              ok: true,
+              auth_configured: !!data.auth_configured,
+              workspace_configured: !!data.workspace_configured,
+            });
+          } else {
+            settle({ ok: false, error: '保存登录态失败' });
+          }
+        }
+      } catch (_) {
+        settle({ ok: false, error: '保存登录态失败' });
+      }
+      setTimeout(() => { if (loginWin && !loginWin.isDestroyed()) loginWin.close(); }, 300);
     };
     loginWin.webContents.on('did-navigate', tryCapture);
     loginWin.webContents.on('did-redirect-navigation', tryCapture);

@@ -2,6 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src http://127.0.0.1:* http://localhost:*; img-src data:; base-uri 'none'; form-action 'none'; frame-src 'none'; object-src 'none'">
 <title>OpenCode-widget</title>
 <style>
   :root {
@@ -418,6 +419,31 @@
 
 <script>
 const $ = (s) => document.querySelector(s);
+// HTML 转义：所有来自 API/DB/formula/配置的数据插入 innerHTML 前必须经过
+const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+// 本地 API 基址 + runtime token 由主进程通过 IPC 提供；未就绪时按现有 catch 行为失败
+let API_BASE = "", API_TOKEN = "", apiEnvPromise = null;
+function ensureApiEnv() {
+  if (API_BASE) return Promise.resolve();
+  if (!apiEnvPromise) {
+    apiEnvPromise = (async () => {
+      try {
+        const env = await window.widgetAPI.apiEnv();
+        if (env && env.base) { API_BASE = env.base; API_TOKEN = env.token || ""; }
+      } catch (_) { /* 保持未就绪，后续重试 */ }
+    })().finally(() => { apiEnvPromise = null; });
+  }
+  return apiEnvPromise;
+}
+// 统一 fetch：前缀 base + 注入 Authorization（及调用方给定的 Content-Type）
+async function apiFetch(path, opts) {
+  await ensureApiEnv();
+  const o = opts ? { ...opts } : {};
+  o.headers = Object.assign({}, o.headers || {});
+  if (API_TOKEN) o.headers["Authorization"] = "Bearer " + API_TOKEN;
+  return fetch(API_BASE + path, o);
+}
 const money = (v) => v == null ? "—" : (v >= 1 ? "$" + v.toFixed(2) : (v >= 0.01 ? "$" + v.toFixed(3) : "$" + v.toFixed(4)));
 const countdown = (ms) => {
   if (ms <= 0) return "已重置";
@@ -483,8 +509,7 @@ let FORMULA = null;
 
 async function loadFormula(force = false) {
   try {
-    const url = `http://127.0.0.1:8765/api/formula${force ? "?refresh=1" : ""}`;
-    const f = await fetch(url).then(r => r.json());
+    const f = await apiFetch(`/api/formula${force ? "?refresh=1" : ""}`).then(r => r.json());
     FORMULA = f;
     if (f.params?.meter?.ratio) RATIO = Number(f.params.meter.ratio);
     SUBSET_SRCS = Object.keys(f.params?.sources?.subset_of || {});
@@ -497,7 +522,7 @@ async function fetchView(id) {
   if (!state._viewCache) state._viewCache = {};
   if (state._viewCache[id]) return state._viewCache[id];
   try {
-    const r = await fetch(`http://127.0.0.1:8765/api/view/${encodeURIComponent(id)}`);
+    const r = await apiFetch(`/api/view/${encodeURIComponent(id)}`);
     if (!r.ok) return null;
     const data = await r.json();
     state._viewCache[id] = data;
@@ -617,7 +642,7 @@ function renderSide() {
     const div = document.createElement("div");
     div.className = "c-item" + (state.mode === k ? " active" : "");
     const resetPart = w.reset_text || (typeof w.reset === "number" && w.reset ? countdown(w.reset - Date.now()) : "");
-    div.innerHTML = `<span class="sw" style="background:${RING_COLORS[i]}"></span><span class="nm">${periodName(k)}</span><span class="bar"><i style="width:${Math.min(100, w.pct)}%;background:${ringColor(w.pct)}"></i></span><span class="pv">${Math.round(w.pct)}%</span><span class="rs">${resetPart}</span>`;
+    div.innerHTML = `<span class="sw" style="background:${RING_COLORS[i]}"></span><span class="nm">${periodName(k)}</span><span class="bar"><i style="width:${Math.min(100, w.pct)}%;background:${ringColor(w.pct)}"></i></span><span class="pv">${Math.round(w.pct)}%</span><span class="rs">${esc(resetPart)}</span>`;
     div.onclick = () => { state.mode = k; render(); };
     side.appendChild(div);
   });
@@ -625,7 +650,7 @@ function renderSide() {
   if (rw && (rw.reset_text || rw.reset)) {
     const resetDiv = document.createElement("div");
     resetDiv.className = "c-reset";
-    resetDiv.innerHTML = '<span class="c-reset-dot"></span>' + (rw.reset_text || (typeof rw.reset === "number" && rw.reset ? countdown(rw.reset - Date.now()) : ""));
+    resetDiv.innerHTML = '<span class="c-reset-dot"></span>' + esc(rw.reset_text || (typeof rw.reset === "number" && rw.reset ? countdown(rw.reset - Date.now()) : ""));
     side.appendChild(resetDiv);
   }
 }
@@ -694,7 +719,7 @@ function fillModelList(el, key) {
     div.className = "m-item" + (selModel === mKey ? " sel" : "") + (isFree ? " free" : "") + (unused ? " unused" : "");
     const val = modelValue(x, key);
     const isQuota = x.group === "go" && !isTok;
-    const srcTag = (x.source && x.source !== "known" && x.source !== "?") ? `[${supTag(x.source)}] ` : "";
+    const srcTag = (x.source && x.source !== "known" && x.source !== "?") ? `[${esc(supTag(x.source))}] ` : "";
     let main = isTok ? fmtTokens(val) : val + "次";
     let barPct = 0, extra = "", rem = "";
     if (isQuota) {
@@ -740,7 +765,7 @@ function fillModelList(el, key) {
       extra = fmtTokens((x.tokens_in || 0) + (x.tokens_out || 0) + (x.tokens_cache || 0)) + " tok";
     }
     const barCol = isQuota ? (barPct >= 100 ? "background:#ef4444" : "") : "";
-    div.innerHTML = `<span class="nm" title="${x.model}">${srcTag}${x.name}</span><span class="bar"><i style="width:${barPct}%${barCol ? ";" + barCol : ""}"></i></span><span class="cnt">${main}<span class="sub">${extra}</span>${rem}</span>`;
+    div.innerHTML = `<span class="nm" title="${esc(x.model)}">${srcTag}${esc(x.name)}</span><span class="bar"><i style="width:${barPct}%${barCol ? ";" + barCol : ""}"></i></span><span class="cnt">${esc(main)}<span class="sub">${esc(extra)}</span>${esc(rem)}</span>`;
 div.onclick = () => {
 if (selModel === mKey) selModel = null;
 else {
@@ -786,7 +811,7 @@ function renderLimits() {
     const div = document.createElement("div");
     div.className = "l-card" + (state.mode === k ? " active" : "");
     const resetPart = w.reset_text || (typeof w.reset === "number" && w.reset ? countdown(w.reset - Date.now()) : "");
-    div.innerHTML = `<div class="l-top"><span class="l-name">${periodName(k)}</span><span class="l-pct" style="color:${ringColor(w.pct)}">${Math.round(w.pct)}%</span></div><div class="l-bar"><i style="width:${Math.min(100, w.pct)}%;background:${ringColor(w.pct)}"></i></div><div class="l-sub"><span>${w.used != null ? money(w.used) + "/" + money(w.limit) : ""}</span><span>${resetPart}</span></div>`;
+    div.innerHTML = `<div class="l-top"><span class="l-name">${periodName(k)}</span><span class="l-pct" style="color:${ringColor(w.pct)}">${Math.round(w.pct)}%</span></div><div class="l-bar"><i style="width:${Math.min(100, w.pct)}%;background:${ringColor(w.pct)}"></i></div><div class="l-sub"><span>${w.used != null ? money(w.used) + "/" + money(w.limit) : ""}</span><span>${esc(resetPart)}</span></div>`;
     div.onclick = () => { state.mode = k; render(); };
     dl.appendChild(div);
   });
@@ -885,9 +910,9 @@ inner += `<path d="${area}" fill="url(#${gradId})"/>`;
   const labelStep = Math.max(1, Math.ceil(minPxPerLabel * dates.length / actualW));
   dates.forEach((d, i) => {
     if (i % labelStep === 0) {
-      inner += `<text x="${xOf(d).toFixed(1)}" y="${H-4}" fill="#8a93a6" font-size="7.5" text-anchor="middle">${d.slice(5)}</text>`;
+      inner += `<text x="${xOf(d).toFixed(1)}" y="${H-4}" fill="#8a93a6" font-size="7.5" text-anchor="middle">${esc(d.slice(5))}</text>`;
     } else if (i === dates.length - 1 && (i - 1) % labelStep !== 0) {
-      inner += `<text x="${xOf(d).toFixed(1)}" y="${H-4}" fill="#8a93a6" font-size="7.5" text-anchor="middle">${d.slice(5)}</text>`;
+      inner += `<text x="${xOf(d).toFixed(1)}" y="${H-4}" fill="#8a93a6" font-size="7.5" text-anchor="middle">${esc(d.slice(5))}</text>`;
     }
   });
   pts.forEach((p) => {
@@ -926,7 +951,7 @@ const d = dates[Math.max(0, Math.min(dates.length - 1, di))];
 const b = byDateMap[d];
 if (!b) { tipEl.style.display = "none"; return; }
 tipEl.style.display = "block";
-tipEl.innerHTML = `${d}<br><b>${fmtTokens(b.tokens || 0)}</b> tok<br>${(b.count || 0)} 次`;
+tipEl.innerHTML = `${esc(d)}<br><b>${fmtTokens(b.tokens || 0)}</b> tok<br>${(b.count || 0)} 次`;
 tipEl.style.left = "0px";
 const tipRect = tipEl.getBoundingClientRect();
 const boxRectT = chartBox.getBoundingClientRect();
@@ -966,7 +991,7 @@ state.history.find(h => h.key === selKey);
       ["提示词", (s.prompts || 0) + " 条"],
       ["活跃", (s.days || 0) + " 天"],
     ];
-    detail.innerHTML = `<div class="d-detail-name">${(s.source && s.source !== "known" && s.source !== "?") ? `[${supTag(s.source)}] ` : ""}${s.name || s.model}</div>` +
+    detail.innerHTML = `<div class="d-detail-name">${(s.source && s.source !== "known" && s.source !== "?") ? `[${esc(supTag(s.source))}] ` : ""}${esc(s.name || s.model)}</div>` +
       cells.map(([k, v]) => `<span class="d-detail-cell"><b>${k}</b>${v}</span>`).join("");
   }
   if (!item || !item.series.length) { svg.innerHTML = ""; title.textContent = "暂无历史数据"; if (note) note.textContent = ""; return; }
@@ -1031,9 +1056,9 @@ state.history.find(h => h.key === selKey);
   const labelStep2 = Math.max(1, Math.ceil(36 * dates.length / actualW2));
   dates.forEach((d, i) => {
     if (i % labelStep2 === 0) {
-      inner += `<text x="${xOf(d).toFixed(1)}" y="${H-4}" fill="#8a93a6" font-size="7.5" text-anchor="middle">${d.slice(5)}</text>`;
+      inner += `<text x="${xOf(d).toFixed(1)}" y="${H-4}" fill="#8a93a6" font-size="7.5" text-anchor="middle">${esc(d.slice(5))}</text>`;
     } else if (i === dates.length - 1 && (i - 1) % labelStep2 !== 0) {
-      inner += `<text x="${xOf(d).toFixed(1)}" y="${H-4}" fill="#8a93a6" font-size="7.5" text-anchor="middle">${d.slice(5)}</text>`;
+      inner += `<text x="${xOf(d).toFixed(1)}" y="${H-4}" fill="#8a93a6" font-size="7.5" text-anchor="middle">${esc(d.slice(5))}</text>`;
     }
   });
   // 数据点（hover 详情由自定义 tooltip 提供）
@@ -1077,7 +1102,7 @@ state.history.find(h => h.key === selKey);
       const idx = Math.round(ratio * (dates.length - 1));
       const d = dates[idx];
       const p = byDateMap[d];
-      let html = `<div class="ct-date">${d}</div>`;
+      let html = `<div class="ct-date">${esc(d)}</div>`;
       if (p) {
         const tok = (p.tokens_in || 0) + (p.tokens_out || 0) + (p.tokens_cache || 0);
         html += `<div class="ct-row"><span>Token</span><b>${fmtTokens(tok)}</b></div>`;
@@ -1328,7 +1353,7 @@ const selName = isModelSel
     if (supOffset > Math.max(0, list.length - SUP_TABS_MAX)) supOffset = Math.max(0, list.length - SUP_TABS_MAX);
     const winS = list.slice(supOffset, supOffset + SUP_TABS_MAX);
     tabs.innerHTML = [["all", "全部"], ...winS.map(s => [s, supName(s)])]
-      .map(([s, n]) => `<button class="sup-tab${src === s ? " on" : ""}" data-sup="${s}">${n}</button>`).join("");
+      .map(([s, n]) => `<button class="sup-tab${src === s ? " on" : ""}" data-sup="${esc(s)}">${esc(n)}</button>`).join("");
 tabs.querySelectorAll(".sup-tab").forEach(b => {
 b.onclick = () => {
 selSupplier = b.dataset.sup === "all" ? null : b.dataset.sup;
@@ -1438,7 +1463,7 @@ render();
   for (let i = 0; i < days.length; i += 7) weeks.push(days.slice(i, i + 7));
   const maxV = Math.max(1, ...Object.values(byDate).map(v => v.tokens || 0));
   const DOW = ["日", "一", "二", "三", "四", "五", "六"];
-  let h = `<div class="heat-head"><span class="heat-title">${selName} · 使用热力图</span><span class="heat-legend">少 <i style="background:${HEAT_COLORS[0]}"></i><i style="background:${HEAT_COLORS[1]}"></i><i style="background:${HEAT_COLORS[2]}"></i><i style="background:${HEAT_COLORS[3]}"></i><i style="background:${HEAT_COLORS[4]}"></i><i style="background:${HEAT_COLORS[5]}"></i> 多</span></div>`;
+  let h = `<div class="heat-head"><span class="heat-title">${esc(selName)} · 使用热力图</span><span class="heat-legend">少 <i style="background:${HEAT_COLORS[0]}"></i><i style="background:${HEAT_COLORS[1]}"></i><i style="background:${HEAT_COLORS[2]}"></i><i style="background:${HEAT_COLORS[3]}"></i><i style="background:${HEAT_COLORS[4]}"></i><i style="background:${HEAT_COLORS[5]}"></i> 多</span></div>`;
   h += `<div class="heat-wrap"><div class="heat-dow">${DOW.map(d => `<span>${d}</span>`).join("")}</div>`;
   weeks.forEach(week => {
     h += `<div class="heat-col">`;
@@ -1448,7 +1473,7 @@ render();
       const v = byDate[date];
       const col = v ? heatColor(v.tokens, maxV) : HEAT_COLORS[0];
       const tip = v ? `${date} · ${v.count}次 · ${fmtTokens(v.tokens)} tok · $${(v.cost || 0).toFixed(4)}` : date + " · 无使用";
-      h += `<div class="heat-cell" title="${tip}" style="background:${col}"></div>`;
+      h += `<div class="heat-cell" title="${esc(tip)}" style="background:${col}"></div>`;
     }
     h += `</div>`;
   });
@@ -1458,7 +1483,7 @@ render();
 
 async function refresh() {
   try {
-    const data = await fetch("http://127.0.0.1:8765/api/state").then(r => r.json());
+    const data = await apiFetch("/api/state").then(r => r.json());
     state.windows = data.windows; state.stats = data.stats; state.history = data.history || [];
     state.suppliers = data.suppliers || {};
     state.heatmap = data.heatmap || [];
@@ -1552,13 +1577,17 @@ async function initExpanded() {
 }
 
 async function showServer() {
-  const d = await fetch("http://127.0.0.1:8765/api/config").then(r => r.json()).catch(() => ({}));
-  const srv = d.server || {};
-  $("#srvCookie").value = srv.auth_cookie || ""; $("#srvWs").value = srv.workspace_id || "";
+  const d = await apiFetch("/api/config").then(r => r.json()).catch(() => ({}));
+  // 不再回填任何密钥；Cookie 始终留空，占位提示是否已配置
+  const cookieEl = $("#srvCookie");
+  cookieEl.value = "";
+  cookieEl.placeholder = d.auth_configured ? "已配置（留空则不修改）" : "未配置";
+  // workspace_id 是标识符（非密钥），可回填
+  $("#srvWs").value = d.workspace_id || "";
   $("#srvMsg").textContent = ""; showModal("serverMask");
 }
 async function showCal() {
-  const d = await fetch("http://127.0.0.1:8765/api/config").then(r => r.json()).catch(() => ({}));
+  const d = await apiFetch("/api/config").then(r => r.json()).catch(() => ({}));
   const c = d.calibration || {};
   $("#calS").value = c.session ?? ""; $("#calW").value = c.weekly ?? ""; $("#calM").value = c.monthly ?? "";
   const s = win("session"), w = win("weekly"), m = win("monthly");
@@ -1568,8 +1597,11 @@ async function showCal() {
   $("#calMsg").textContent = ""; showModal("calMask");
 }
 async function showKey() {
-  const d = await fetch("http://127.0.0.1:8765/api/config").then(r => r.json()).catch(() => ({}));
-  $("#keyInput").value = d.api_key || "";
+  const d = await apiFetch("/api/config").then(r => r.json()).catch(() => ({}));
+  const inp = $("#keyInput");
+  // 不回填密钥；空则不改动
+  inp.value = "";
+  inp.placeholder = d.api_key_configured ? "已配置（留空则不修改）" : "未配置";
   $("#keyMsg").textContent = ""; showModal("keyMask");
 }
 async function doLogin() {
@@ -1583,26 +1615,16 @@ async function doLogin() {
   alert("已在系统浏览器中打开 opencode.ai/auth\n\n请按以下步骤操作：\n\n1. 在浏览器中用你的账号登录 opencode.ai\n2. 登录成功后，地址栏会跳转到类似：\n   https://opencode.ai/workspace/wrk_xxxxx/go\n3. 按 F12 → Application → Cookies → 复制 auth 的值\n4. 回到悬浮窗，右键 → 服务端设置\n5. 粘贴 auth_cookie 和 workspace_id（从 URL 里拿）→ 保存\n6. 右键 → 拉取官方数值 → 完成");
 }
 async function doGrab() {
-  // 自动抓取登录态：优先应用内登录窗口（可靠），其次系统浏览器手动流程
-  let auth_cookie = "", workspace_id = "";
+  // 自动抓取登录态：由主进程在应用内登录窗口捕获并直接提交本地 server，
+  // 渲染层只收到配置状态，不再接触 auth_cookie / workspace_id。
   try {
     const r = await window.widgetAPI.grabAuth();
-    if (r && r.ok) { auth_cookie = r.auth_cookie; workspace_id = r.workspace_id; }
-    else if (r && r.error) { alert("自动抓取失败：" + r.error); return; }
+    if (!r || !r.ok) { alert("自动抓取失败：" + (r && r.error ? r.error : "未知错误")); return; }
   } catch (e) {
     alert("自动抓取失败：" + (e.message || e)); return;
   }
-  if (!auth_cookie || !workspace_id) { alert("未能获取登录态"); return; }
-  const sv = await fetch("http://127.0.0.1:8765/api/server", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ auth_cookie, workspace_id }),
-  }).then(r => r.json()).catch(() => ({}));
-  if (!sv.ok) { alert("保存登录态失败"); return; }
-  const s = await fetch("http://127.0.0.1:8765/api/sync", { method: "POST" }).then(r => r.json()).catch(() => ({ ok: false, error: "同步请求失败" }));
   await refresh();
-  if (s.ok) alert("已自动抓取登录态并同步官方数值");
-  else alert("同步失败：" + (s.error || "未知错误"));
+  alert("已自动抓取登录态并同步官方数值");
 }
 
 
@@ -1714,7 +1736,7 @@ $("#ctx").addEventListener("click", (e) => {
 
 $("#calSave").onclick = async () => {
   const v = { session: +$("#calS").value || 0, weekly: +$("#calW").value || 0, monthly: +$("#calM").value || 0 };
-  const r = await fetch("http://127.0.0.1:8765/api/calibrate", {
+  const r = await apiFetch("/api/calibrate", {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify(v),
   }).then(r => r.json()).catch(() => ({ ok: false }));
@@ -1722,19 +1744,22 @@ $("#calSave").onclick = async () => {
   if (r.ok) { setTimeout(() => hideModal("calMask"), 900); refresh(); }
 };
 $("#calClear").onclick = async () => {
-  await fetch("http://127.0.0.1:8765/api/calibrate", {
+  await apiFetch("/api/calibrate", {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ session: 0, weekly: 0, monthly: 0 }),
   }).catch(() => {});
   $("#calMsg").textContent = "已清除"; refresh();
 };
 $("#keySave").onclick = async () => {
-  const r = await fetch("http://127.0.0.1:8765/api/key", {
+  const key = $("#keyInput").value.trim();
+  // 空输入 = 用户未修改，直接跳过，避免误清空已配置的 Key
+  if (!key) { $("#keyMsg").textContent = "未修改"; return; }
+  const r = await apiFetch("/api/key", {
     method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ key: $("#keyInput").value.trim() }),
+    body: JSON.stringify({ key }),
   }).then(r => r.json()).catch(() => ({ ok: false }));
   $("#keyMsg").textContent = r.ok ? "Key 已保存 ✓" : "保存失败";
-  if (r.ok) { setTimeout(() => hideModal("keyMask"), 900); refresh(); }
+  if (r.ok) { $("#keyInput").value = ""; setTimeout(() => hideModal("keyMask"), 900); refresh(); }
 };
 $("#keyCancel").onclick = () => hideModal("keyMask");
 $("#srvGrab").onclick = async () => {
@@ -1742,9 +1767,9 @@ $("#srvGrab").onclick = async () => {
   try {
     const r = await window.widgetAPI.grabAuth();
     if (r && r.ok) {
-      $("#srvCookie").value = r.auth_cookie;
-      $("#srvWs").value = r.workspace_id;
-      $("#srvMsg").textContent = "已自动获取 ✓（可点「保存并测试」）";
+      $("#srvCookie").value = "";
+      $("#srvMsg").textContent = "已自动获取并保存 ✓";
+      await refresh();
     } else {
       $("#srvMsg").textContent = "未获取到登录态：" + (r && r.error ? r.error : "未知错误");
     }
@@ -1753,19 +1778,24 @@ $("#srvGrab").onclick = async () => {
   }
 };
 $("#srvSave").onclick = async () => {
-  const r = await fetch("http://127.0.0.1:8765/api/server", {
+  const cookie = $("#srvCookie").value.trim();
+  const ws = $("#srvWs").value.trim();
+  // 空 Cookie = 未修改，跳过提交，避免误清空
+  if (!cookie) { $("#srvMsg").textContent = "Cookie 为空，未提交"; return; }
+  const r = await apiFetch("/api/server", {
     method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ auth_cookie: $("#srvCookie").value.trim(), workspace_id: $("#srvWs").value.trim() }),
+    body: JSON.stringify({ auth_cookie: cookie, workspace_id: ws }),
   }).then(r => r.json()).catch(() => ({ ok: false }));
   if (!r.ok) { $("#srvMsg").textContent = "保存失败"; return; }
+  $("#srvCookie").value = "";
   $("#srvMsg").textContent = "已保存，正在同步…";
-  const s = await fetch("http://127.0.0.1:8765/api/sync", { method: "POST" }).then(r => r.json()).catch(() => ({ ok: false, error: "同步失败" }));
+  const s = await apiFetch("/api/sync", { method: "POST" }).then(r => r.json()).catch(() => ({ ok: false, error: "同步失败" }));
   await refresh();
   if (s.ok) { $("#srvMsg").textContent = "✓ 服务器数值已同步"; setTimeout(() => hideModal("serverMask"), 1200); }
   else $("#srvMsg").textContent = "已保存，但同步失败：" + (s.error || "未知错误");
 };
 $("#srvClear").onclick = async () => {
-  await fetch("http://127.0.0.1:8765/api/server", {
+  await apiFetch("/api/server", {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ auth_cookie: "", workspace_id: "" }),
   }).catch(() => {});
@@ -1794,6 +1824,7 @@ window.widgetAPI.onSnapRestore((s) => {
 initOpacity();
 syncScale();
 loadViewPrefs();
+ensureApiEnv(); // 启动即解析 runtime base/token（失败由各请求的 catch 兜底）
 function syncScale() {
   const s = Math.max(0.7, Math.min(1.4, (window.innerWidth || 560) / 560));
   document.documentElement.style.setProperty("--scale", String(s));
