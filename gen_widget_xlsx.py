@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """生成 widget 模型用量公式表 (xlsx)"""
-import json, urllib.request, zipfile, re, os, sys
+import json, urllib.request, zipfile, re, os, sys, tempfile
 from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -15,16 +15,34 @@ except ImportError:
     print("请先安装 openpyxl: pip install openpyxl")
     sys.exit(1)
 
-API = "http://127.0.0.1:8765/api/state"
 OUT = os.path.join(os.path.expanduser("~"), "Desktop", "widget-formula.xlsx")
 if os.path.exists(OUT):
     base, ext = os.path.splitext(OUT)
     OUT = f"{base}_{datetime.now().strftime('%H%M%S')}{ext}"
 
 # ---------- 拉取 API ----------
+def _runtime_dir():
+    return os.environ.get("OPENCODE_WIDGET_RUNTIME_DIR") or os.path.join(
+        tempfile.gettempdir(), "opencode-widget")
+
+
 def fetch_state():
-    r = urllib.request.urlopen(API, timeout=15)
-    return json.loads(r.read().decode("utf-8"))
+    """Phase 2A: 从 runtime.json 读取端口/token 并发起带 Bearer 认证的请求。"""
+    path = os.path.join(_runtime_dir(), "runtime.json")
+    if not os.path.exists(path):
+        raise SystemExit(f"未找到运行时文件 {path}，请先启动 data_server.py")
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            info = json.load(fh)
+    except Exception as e:
+        raise SystemExit(f"读取运行时文件失败 {path}: {e}")
+    token = info.get("token") or ""
+    port = info.get("port") or 8765
+    url = f"http://127.0.0.1:{port}/api/state"
+    req = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}"})
+    with urllib.request.urlopen(req, timeout=15) as r:
+        return json.loads(r.read().decode("utf-8"))
+
 
 # ---------- 读取桌面 widget.xlsx 模板（可选） ----------
 def read_widget_template(path):

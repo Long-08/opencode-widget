@@ -12,7 +12,10 @@ import threading
 import time
 import datetime
 import bisect
+import hmac
 import importlib.util
+import secrets
+import tempfile
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -36,8 +39,49 @@ except Exception:
 import views as vw
 import formula_registry as fr
 
-PORT = 8765
+PORT = int(os.environ.get("OPENCODE_WIDGET_PORT") or 8765)
 CACHE = {"state": None, "ts": 0, "lock": threading.Lock()}
+
+# ---- Phase 2A: runtime token + runtime.json ----
+# Token is generated lazily, never logged and never returned by any endpoint.
+_TOKEN = None
+
+
+def ensure_runtime_token():
+    """惰性生成 >=256-bit 的运行时 token (secrets.token_urlsafe(32))。"""
+    global _TOKEN
+    if _TOKEN is None:
+        _TOKEN = secrets.token_urlsafe(32)
+    return _TOKEN
+
+
+def _runtime_dir():
+    return os.environ.get("OPENCODE_WIDGET_RUNTIME_DIR") or os.path.join(
+        tempfile.gettempdir(), "opencode-widget")
+
+
+def _write_runtime_info(port):
+    """原子写入 runtime.json (tmp + os.replace), 供 Electron / 脚本读取 token。
+
+    任何失败 (含目录创建) 都静默忽略, 绝不拖垮服务器。
+    """
+    try:
+        directory = _runtime_dir()
+        os.makedirs(directory, exist_ok=True)
+        payload = {
+            "token": ensure_runtime_token(),
+            "port": int(port),
+            "pid": os.getpid(),
+            "created": int(time.time() * 1000),
+        }
+        path = os.path.join(directory, "runtime.json")
+        tmp = path + ".tmp"
+        with open(tmp, "wb") as fh:
+            fh.write(json.dumps(payload, ensure_ascii=False).encode("utf-8"))
+        os.replace(tmp, path)
+    except Exception:
+        pass
+
 
 _FORMULA_STORE = vw.FormulaStore(url="")
 _FORMULA_ENGINE = None
@@ -50,6 +94,15 @@ def _formula_url():
         return (cfg.get("formula_url") or "").strip()
     except Exception:
         return ""
+
+
+def _formula_enabled():
+    """公式开关: 仅显式 False 才禁用 (缺省 True)。"""
+    try:
+        cfg = gw.load_config()
+        return cfg.get("formula_enabled", True) is not False
+    except Exception:
+        return True
 
 
 def apply_params_to_gw(formula):
@@ -113,11 +166,15 @@ def apply_params_to_gw(formula):
 
 
 def get_formula(force=False):
-    """返回当前公式 (云端/默认), 并同步重建引擎 + 覆盖本地规则表。"""
+    """返回当前公式 (云端/默认), 并同步重建引擎 + 覆盖本地规则表。
+
+    url 或 enabled 变化时重建 FormulaStore (禁用开关走 formula_enabled)。
+    """
     global _FORMULA_STORE, _FORMULA_ENGINE
     url = _formula_url()
-    if _FORMULA_STORE.url != url:
-        _FORMULA_STORE = vw.FormulaStore(url=url)
+    enabled = _formula_enabled()
+    if _FORMULA_STORE.url != vw.resolve_formula_url(url) or _FORMULA_STORE.enabled != enabled:
+        _FORMULA_STORE = vw.FormulaStore(url=url, enabled=enabled)
     f = _FORMULA_STORE.get(force=force)
     apply_params_to_gw(f)
     fr.apply_formulas(f.get("formulas") if isinstance(f, dict) else None)
@@ -583,9 +640,14 @@ def _config_json():
         cfg = gw.load_config()
     except Exception:
         cfg = {}
+    srv = cfg.get("server") or {}
+    # Phase 2A: never expose api_key / auth_cookie. workspace_id is kept on purpose:
+    # it is a non-secret identifier needed to prefill the manual server-config UI.
     return {
-        "api_key": cfg.get("api_key") or "",
-        "server": cfg.get("server") or {"auth_cookie": "", "workspace_id": ""},
+        "api_key_configured": bool((cfg.get("api_key") or "").strip()),
+        "auth_configured": bool((srv.get("auth_cookie") or "").strip()),
+        "workspace_configured": bool((srv.get("workspace_id") or "").strip()),
+        "workspace_id": (srv.get("workspace_id") or "").strip(),
         "calibration": cfg.get("calibration") or {},
     }
 
@@ -629,16 +691,15 @@ def do_grab():
             gw.save_config(cfg)
         except Exception:
             pass
-    return {"ok": True, "auth_cookie": cookie, "workspace_id": ws}
+    # Phase 2A: persist server-side, but never echo the cookie back to the caller.
+    return {"ok": True, "auth_configured": True, "workspace_configured": bool(ws)}
 
 
 def _send_json(self, obj, code=200):
     body = json.dumps(obj, ensure_ascii=False).encode("utf-8")
     self.send_response(code)
     self.send_header("Content-Type", "application/json; charset=utf-8")
-    self.send_header("Access-Control-Allow-Origin", "*")
-    self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-    self.send_header("Access-Control-Allow-Headers", "Content-Type")
+    self._send_cors_headers()
     self.send_header("Content-Length", str(len(body)))
     self.end_headers()
     self.wfile.write(body)
@@ -647,6 +708,73 @@ def _send_json(self, obj, code=200):
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *args):
         pass
+
+    # ---- Phase 2A: Host / Origin / token guards ----
+    def _bound_port(self):
+        return self.server.server_address[1]
+
+    def _host_ok(self):
+        """Host must be 127.0.0.1|localhost with the actual bound port."""
+        host = self.headers.get("Host") or ""
+        hostname, sep, port_s = host.rpartition(":")
+        if not sep:
+            return False
+        hostname = hostname.strip().lower()
+        try:
+            port = int(port_s)
+        except Exception:
+            return False
+        return hostname in ("127.0.0.1", "localhost") and port == self._bound_port()
+
+    def _origin_allowed(self):
+        """None -> no Origin; str -> allowed origin to echo; False -> forbidden."""
+        origin = self.headers.get("Origin")
+        if origin is None:
+            return None
+        if origin == "null":
+            return "null"
+        port = self._bound_port()
+        if origin in (f"http://127.0.0.1:{port}", f"http://localhost:{port}"):
+            return origin
+        return False
+
+    def _auth_ok(self):
+        header = self.headers.get("Authorization") or ""
+        if not header.startswith("Bearer "):
+            return False
+        provided = header[len("Bearer "):].strip()
+        return hmac.compare_digest(provided, ensure_runtime_token())
+
+    def _guard(self, require_auth=True):
+        """Return True when the request may proceed; else send the 403/401 JSON."""
+        if not self._host_ok():
+            _send_json(self, {"ok": False, "error": "forbidden_host"}, 403)
+            return False
+        if self._origin_allowed() is False:
+            _send_json(self, {"ok": False, "error": "forbidden_origin"}, 403)
+            return False
+        if require_auth and not self._auth_ok():
+            _send_json(self, {"ok": False, "error": "unauthorized"}, 401)
+            return False
+        return True
+
+    def _send_cors_headers(self):
+        """Echo an allowlisted Origin (never '*'); omit ACAO when absent/forbidden."""
+        origin = self._origin_allowed()
+        if isinstance(origin, str):
+            self.send_header("Access-Control-Allow-Origin", origin)
+            self.send_header("Vary", "Origin")
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+            self.send_header("Access-Control-Allow-Headers", "Authorization, Content-Type")
+
+    def _send_health(self):
+        body = b"ok"
+        self.send_response(200)
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self._send_cors_headers()
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
     def _read_body(self):
         try:
@@ -661,6 +789,14 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = self.path.split("?")[0]
+        if path == "/api/health":
+            # Phase 2A: health is anonymous but still Host/CORS guarded.
+            if not self._guard(require_auth=False):
+                return
+            self._send_health()
+            return
+        if not self._guard():
+            return
         if path == "/api/state":
             now = time.time()
             with CACHE["lock"]:
@@ -674,7 +810,7 @@ class Handler(BaseHTTPRequestHandler):
                 body = json.dumps(CACHE["state"], ensure_ascii=False).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "application/json; charset=utf-8")
-            self.send_header("Access-Control-Allow-Origin", "*")
+            self._send_cors_headers()
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
@@ -691,6 +827,11 @@ class Handler(BaseHTTPRequestHandler):
                 "url": meta["url"],
                 "error": meta["error"],
                 "fetched_at": meta["fetched_at"],
+                # Phase 2A: provenance fields
+                "enabled": meta.get("enabled", True),
+                "hash": meta.get("hash"),
+                "last_updated": meta.get("last_updated", meta.get("fetched_at")),
+                "fallback": meta.get("fallback", False),
                 "params": f.get("params"),
                 "views": f.get("views"),
                 "constants": f.get("constants"),
@@ -712,17 +853,12 @@ class Handler(BaseHTTPRequestHandler):
                 _send_json(self, {"ok": False, "error": str(e)}, 404)
             except Exception as e:
                 _send_json(self, {"ok": False, "error": repr(e)}, 500)
-        elif path == "/api/health":
-            body = b"ok"
-            self.send_response(200)
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
         else:
             _send_json(self, {"ok": False, "error": "not found"}, 404)
 
     def do_POST(self):
+        if not self._guard():
+            return
         path = self.path.split("?")[0]
         data = self._read_body()
         try:
@@ -762,10 +898,16 @@ class Handler(BaseHTTPRequestHandler):
             _send_json(self, {"ok": False, "error": "not found"}, 404)
 
     def do_OPTIONS(self):
+        # Phase 2A: preflight needs no token; 204 with CORS headers when the
+        # Origin is allowlisted, 403 otherwise. Never ACAO "*".
+        if not self._host_ok():
+            _send_json(self, {"ok": False, "error": "forbidden_host"}, 403)
+            return
+        if self._origin_allowed() is False:
+            _send_json(self, {"ok": False, "error": "forbidden_origin"}, 403)
+            return
         self.send_response(204)
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self._send_cors_headers()
         self.end_headers()
 
 
@@ -803,7 +945,9 @@ def main():
     threading.Thread(target=auto_sync_loop, daemon=True).start()
     threading.Thread(target=formula_sync_loop, daemon=True).start()
     srv = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
-    print(f"[data-server] listening on http://127.0.0.1:{PORT}/api/state")
+    actual_port = srv.server_address[1]
+    _write_runtime_info(actual_port)
+    print(f"[data-server] listening on http://127.0.0.1:{actual_port}/api/state")
     srv.serve_forever()
 
 
