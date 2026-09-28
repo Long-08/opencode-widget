@@ -422,28 +422,8 @@ const $ = (s) => document.querySelector(s);
 // HTML 转义：所有来自 API/DB/formula/配置的数据插入 innerHTML 前必须经过
 const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
-// 本地 API 基址 + runtime token 由主进程通过 IPC 提供；未就绪时按现有 catch 行为失败
-let API_BASE = "", API_TOKEN = "", apiEnvPromise = null;
-function ensureApiEnv() {
-  if (API_BASE) return Promise.resolve();
-  if (!apiEnvPromise) {
-    apiEnvPromise = (async () => {
-      try {
-        const env = await window.widgetAPI.apiEnv();
-        if (env && env.base) { API_BASE = env.base; API_TOKEN = env.token || ""; }
-      } catch (_) { /* 保持未就绪，后续重试 */ }
-    })().finally(() => { apiEnvPromise = null; });
-  }
-  return apiEnvPromise;
-}
-// 统一 fetch：前缀 base + 注入 Authorization（及调用方给定的 Content-Type）
-async function apiFetch(path, opts) {
-  await ensureApiEnv();
-  const o = opts ? { ...opts } : {};
-  o.headers = Object.assign({}, o.headers || {});
-  if (API_TOKEN) o.headers["Authorization"] = "Bearer " + API_TOKEN;
-  return fetch(API_BASE + path, o);
-}
+// 本地 API 由主进程代理（window.widgetAPI.apiGet*/apiPost*），token 不下发渲染层；
+// 各调用点沿用原有 try/catch 与默认值兜底。
 const money = (v) => v == null ? "—" : (v >= 1 ? "$" + v.toFixed(2) : (v >= 0.01 ? "$" + v.toFixed(3) : "$" + v.toFixed(4)));
 const countdown = (ms) => {
   if (ms <= 0) return "已重置";
@@ -509,7 +489,7 @@ let FORMULA = null;
 
 async function loadFormula(force = false) {
   try {
-    const f = await apiFetch(`/api/formula${force ? "?refresh=1" : ""}`).then(r => r.json());
+    const f = await window.widgetAPI.apiGetFormula(force);
     FORMULA = f;
     if (f.params?.meter?.ratio) RATIO = Number(f.params.meter.ratio);
     SUBSET_SRCS = Object.keys(f.params?.sources?.subset_of || {});
@@ -522,9 +502,7 @@ async function fetchView(id) {
   if (!state._viewCache) state._viewCache = {};
   if (state._viewCache[id]) return state._viewCache[id];
   try {
-    const r = await apiFetch(`/api/view/${encodeURIComponent(id)}`);
-    if (!r.ok) return null;
-    const data = await r.json();
+    const data = await window.widgetAPI.apiGetView(id);
     state._viewCache[id] = data;
     return data;
   } catch (e) { return null; }
@@ -1483,7 +1461,7 @@ render();
 
 async function refresh() {
   try {
-    const data = await apiFetch("/api/state").then(r => r.json());
+    const data = await window.widgetAPI.apiGetState();
     state.windows = data.windows; state.stats = data.stats; state.history = data.history || [];
     state.suppliers = data.suppliers || {};
     state.heatmap = data.heatmap || [];
@@ -1577,7 +1555,7 @@ async function initExpanded() {
 }
 
 async function showServer() {
-  const d = await apiFetch("/api/config").then(r => r.json()).catch(() => ({}));
+  const d = await window.widgetAPI.apiGetConfig().catch(() => ({}));
   // 不再回填任何密钥；Cookie 始终留空，占位提示是否已配置
   const cookieEl = $("#srvCookie");
   cookieEl.value = "";
@@ -1587,7 +1565,7 @@ async function showServer() {
   $("#srvMsg").textContent = ""; showModal("serverMask");
 }
 async function showCal() {
-  const d = await apiFetch("/api/config").then(r => r.json()).catch(() => ({}));
+  const d = await window.widgetAPI.apiGetConfig().catch(() => ({}));
   const c = d.calibration || {};
   $("#calS").value = c.session ?? ""; $("#calW").value = c.weekly ?? ""; $("#calM").value = c.monthly ?? "";
   const s = win("session"), w = win("weekly"), m = win("monthly");
@@ -1597,7 +1575,7 @@ async function showCal() {
   $("#calMsg").textContent = ""; showModal("calMask");
 }
 async function showKey() {
-  const d = await apiFetch("/api/config").then(r => r.json()).catch(() => ({}));
+  const d = await window.widgetAPI.apiGetConfig().catch(() => ({}));
   const inp = $("#keyInput");
   // 不回填密钥；空则不改动
   inp.value = "";
@@ -1736,28 +1714,19 @@ $("#ctx").addEventListener("click", (e) => {
 
 $("#calSave").onclick = async () => {
   const v = { session: +$("#calS").value || 0, weekly: +$("#calW").value || 0, monthly: +$("#calM").value || 0 };
-  const r = await apiFetch("/api/calibrate", {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(v),
-  }).then(r => r.json()).catch(() => ({ ok: false }));
+  const r = await window.widgetAPI.apiPostCalibrate(v).catch(() => ({ ok: false }));
   $("#calMsg").textContent = r.ok ? "已保存 ✓" : "保存失败";
   if (r.ok) { setTimeout(() => hideModal("calMask"), 900); refresh(); }
 };
 $("#calClear").onclick = async () => {
-  await apiFetch("/api/calibrate", {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ session: 0, weekly: 0, monthly: 0 }),
-  }).catch(() => {});
+  await window.widgetAPI.apiPostCalibrate({ session: 0, weekly: 0, monthly: 0 }).catch(() => {});
   $("#calMsg").textContent = "已清除"; refresh();
 };
 $("#keySave").onclick = async () => {
   const key = $("#keyInput").value.trim();
   // 空输入 = 用户未修改，直接跳过，避免误清空已配置的 Key
   if (!key) { $("#keyMsg").textContent = "未修改"; return; }
-  const r = await apiFetch("/api/key", {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ key }),
-  }).then(r => r.json()).catch(() => ({ ok: false }));
+  const r = await window.widgetAPI.apiPostKey(key).catch(() => ({ ok: false }));
   $("#keyMsg").textContent = r.ok ? "Key 已保存 ✓" : "保存失败";
   if (r.ok) { $("#keyInput").value = ""; setTimeout(() => hideModal("keyMask"), 900); refresh(); }
 };
@@ -1782,23 +1751,17 @@ $("#srvSave").onclick = async () => {
   const ws = $("#srvWs").value.trim();
   // 空 Cookie = 未修改，跳过提交，避免误清空
   if (!cookie) { $("#srvMsg").textContent = "Cookie 为空，未提交"; return; }
-  const r = await apiFetch("/api/server", {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ auth_cookie: cookie, workspace_id: ws }),
-  }).then(r => r.json()).catch(() => ({ ok: false }));
+  const r = await window.widgetAPI.apiPostServer(cookie, ws).catch(() => ({ ok: false }));
   if (!r.ok) { $("#srvMsg").textContent = "保存失败"; return; }
   $("#srvCookie").value = "";
   $("#srvMsg").textContent = "已保存，正在同步…";
-  const s = await apiFetch("/api/sync", { method: "POST" }).then(r => r.json()).catch(() => ({ ok: false, error: "同步失败" }));
+  const s = await window.widgetAPI.apiPostSync().catch(() => ({ ok: false, error: "同步失败" }));
   await refresh();
   if (s.ok) { $("#srvMsg").textContent = "✓ 服务器数值已同步"; setTimeout(() => hideModal("serverMask"), 1200); }
   else $("#srvMsg").textContent = "已保存，但同步失败：" + (s.error || "未知错误");
 };
 $("#srvClear").onclick = async () => {
-  await apiFetch("/api/server", {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ auth_cookie: "", workspace_id: "" }),
-  }).catch(() => {});
+  await window.widgetAPI.apiPostServer("", "").catch(() => {});
   $("#srvMsg").textContent = "已清除"; refresh();
 };
 ["serverMask","calMask","keyMask"].forEach(id => {
@@ -1824,7 +1787,6 @@ window.widgetAPI.onSnapRestore((s) => {
 initOpacity();
 syncScale();
 loadViewPrefs();
-ensureApiEnv(); // 启动即解析 runtime base/token（失败由各请求的 catch 兜底）
 function syncScale() {
   const s = Math.max(0.7, Math.min(1.4, (window.innerWidth || 560) / 560));
   document.documentElement.style.setProperty("--scale", String(s));

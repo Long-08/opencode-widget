@@ -2,6 +2,7 @@ const { app, BrowserWindow, ipcMain, screen, session } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const runtimeEnv = require('./runtime_env');
 
 // 临时诊断：吸顶判定日志（排查后移除）
 const SNAP_LOG = path.join(os.tmpdir(), 'widget_snap.log');
@@ -27,30 +28,28 @@ async function readAuthCookieFromSession(ses) {
 
 // server 写入的 runtime.json：目录 = OPENCODE_WIDGET_RUNTIME_DIR 或 os.tmpdir()/opencode-widget
 // 内容 {token, port, pid, created}。启动后稍晚才出现，故带重试。
+// 解析逻辑在 runtime_env.js（纯 Node，可单测）。
 const RUNTIME_TIMEOUT_MS = 10000;
 const RUNTIME_INTERVAL_MS = 250;
-function runtimeFilePath() {
-  const dir = process.env.OPENCODE_WIDGET_RUNTIME_DIR || path.join(os.tmpdir(), 'opencode-widget');
-  return path.join(dir, 'runtime.json');
-}
-function readRuntimeOnce() {
-  try {
-    const j = JSON.parse(fs.readFileSync(runtimeFilePath(), 'utf8'));
-    if (j && j.port) return { base: 'http://127.0.0.1:' + j.port, token: j.token || '' };
-  } catch (_) { /* 尚未生成或损坏，继续重试 */ }
-  return null;
-}
 function readRuntimeEnv() {
-  const now = readRuntimeOnce();
-  if (now) return Promise.resolve(now);
+  const attempt = () => {
+    const r = runtimeEnv.readRuntimeOnce(process.env);
+    if (!r.ok && r.reason === 'stale') {
+      // pid 已退出的残留文件：尽力删除后继续等待新 server 写入
+      try { fs.unlinkSync(runtimeEnv.runtimeFilePath(process.env)); } catch (_) { /* ignore */ }
+    }
+    return r;
+  };
+  const now = attempt();
+  if (now.ok) return Promise.resolve(now);
   return new Promise((resolve) => {
     const started = Date.now();
     const timer = setInterval(() => {
-      const r = readRuntimeOnce();
-      if (r) { clearInterval(timer); resolve(r); return; }
+      const r = attempt();
+      if (r.ok) { clearInterval(timer); resolve(r); return; }
       if (Date.now() - started >= RUNTIME_TIMEOUT_MS) {
         clearInterval(timer);
-        resolve({ base: '', token: '' });
+        resolve({ ok: false, reason: 'timeout' });
       }
     }, RUNTIME_INTERVAL_MS);
   });
@@ -273,8 +272,75 @@ ipcMain.handle('open-login', async () => {
   }
 });
 
-// 渲染层获取本地 API 基址与 runtime token（用于对所有 /api/* 附带 Bearer 鉴权）
-ipcMain.handle('api-env', () => readRuntimeEnv());
+// Phase 2.1: 渲染层不再持有 runtime token/base。所有本地 API 调用经 'api-request' 代理：
+// 只放行固定路由（严格校验 method/path/payload），由主进程附带 Bearer 后发起请求，
+// 返回 {ok, status, data} —— token 永不出现在返回值里。
+const API_VIEW_ID_RE = /^[A-Za-z0-9_:|.\-]{1,200}$/;
+const API_AGENT_RANGES = new Set(['today', '7d', '30d', 'all']);
+
+function resolveApiTarget(req) {
+  if (!req || typeof req !== 'object') return null;
+  const method = req.method;
+  const p = typeof req.path === 'string' ? req.path : '';
+  if (method === 'GET') {
+    if (p === '/api/state' || p === '/api/config' || p === '/api/views') return { method, path: p, body: null };
+    if (p === '/api/formula' || p === '/api/formula?refresh=1') return { method, path: p, body: null };
+    if (p === '/api/agents') return { method, path: p, body: null };
+    const ar = /^\/api\/agents\?range=([a-z0-9]+)$/.exec(p);
+    if (ar && API_AGENT_RANGES.has(ar[1])) return { method, path: p, body: null };
+    const vm = /^\/api\/view\/([^/?#]+)$/.exec(p);
+    if (vm && API_VIEW_ID_RE.test(vm[1])) return { method, path: '/api/view/' + encodeURIComponent(vm[1]), body: null };
+    return null;
+  }
+  if (method === 'POST') {
+    const payload = req.payload;
+    if (p === '/api/key') {
+      if (!payload || typeof payload.key !== 'string' || payload.key.length > 4096) return null;
+      return { method, path: p, body: { key: payload.key } };
+    }
+    if (p === '/api/server') {
+      if (!payload || typeof payload.auth_cookie !== 'string' || payload.auth_cookie.length > 8192) return null;
+      if (typeof payload.workspace_id !== 'string' || payload.workspace_id.length > 8192) return null;
+      return { method, path: p, body: { auth_cookie: payload.auth_cookie, workspace_id: payload.workspace_id } };
+    }
+    if (p === '/api/calibrate') {
+      if (!payload) return null;
+      for (const k of ['session', 'weekly', 'monthly']) {
+        if (typeof payload[k] !== 'number' || !Number.isFinite(payload[k])) return null;
+      }
+      return { method, path: p, body: { session: payload.session, weekly: payload.weekly, monthly: payload.monthly } };
+    }
+    if (p === '/api/sync') {
+      if (payload != null) return null;
+      return { method, path: p, body: null };
+    }
+    return null;
+  }
+  return null;
+}
+
+ipcMain.handle('api-request', async (_event, req) => {
+  const target = resolveApiTarget(req);
+  if (!target) return { ok: false, error: 'forbidden' };
+  const env = await readRuntimeEnv();
+  if (!env.ok) return { ok: false, error: 'unavailable' };
+  try {
+    const headers = { 'Authorization': 'Bearer ' + env.token };
+    const init = { method: target.method, headers };
+    if (target.body != null) {
+      headers['Content-Type'] = 'application/json';
+      init.body = JSON.stringify(target.body);
+    }
+    const resp = await fetch(env.base + target.path, init);
+    const text = await resp.text();
+    let data;
+    try { data = text === '' ? null : JSON.parse(text); } catch (_) { data = text; }
+    if (!resp.ok) return { ok: false, status: resp.status, error: 'http_' + resp.status, data };
+    return { ok: true, status: resp.status, data };
+  } catch (_) {
+    return { ok: false, error: 'request_failed' };
+  }
+});
 
 // 应用内登录窗口：自动抓取 auth cookie + workspace_id（替代 F12 手动复制）
 // 抓取后由主进程直接 POST 到本地 server（携带 runtime token），渲染层只拿到配置状态。
@@ -328,7 +394,7 @@ ipcMain.handle('grab-auth', async () => {
       // 交给主进程提交，cookie/workspace 绝不经 IPC 返回渲染层
       try {
         const env = await readRuntimeEnv();
-        if (!env.base) {
+        if (!env.ok) {
           settle({ ok: false, error: '本地服务未就绪（runtime.json 未找到）' });
         } else {
           const resp = await fetch(env.base + '/api/server', {
