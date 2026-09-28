@@ -4,6 +4,7 @@
 Python 只负责取数/计算，前端与窗口交互交给 Electron (electron/main.js)。
 Serves JSON on http://127.0.0.1:8765/api/*
 """
+import atexit
 import json
 import os
 import sqlite3
@@ -79,6 +80,25 @@ def _write_runtime_info(port):
         with open(tmp, "wb") as fh:
             fh.write(json.dumps(payload, ensure_ascii=False).encode("utf-8"))
         os.replace(tmp, path)
+    except Exception:
+        pass
+
+
+def _cleanup_runtime_info():
+    """Best-effort delete of runtime.json IFF it belongs to this process.
+
+    Parsed ``pid`` must equal os.getpid(): a file left by another (stale or
+    live) process is never touched. Missing/unreadable/corrupt file or any
+    other failure -> silent no-op; must never raise.
+    """
+    try:
+        path = os.path.join(_runtime_dir(), "runtime.json")
+        if not os.path.exists(path):
+            return
+        with open(path, "r", encoding="utf-8") as fh:
+            payload = json.load(fh)
+        if isinstance(payload, dict) and payload.get("pid") == os.getpid():
+            os.remove(path)
     except Exception:
         pass
 
@@ -643,6 +663,12 @@ def _config_json():
     except Exception:
         cfg = {}
     srv = cfg.get("server") or {}
+    # Phase 2.1: non-sensitive secret-storage status (backend + status only,
+    # never secret values / ciphertext / entropy).
+    try:
+        secret_storage = gw.secret_storage_status()
+    except Exception:
+        secret_storage = {"backend": "none", "status": "unavailable"}
     # Phase 2A: never expose api_key / auth_cookie. workspace_id is kept on purpose:
     # it is a non-secret identifier needed to prefill the manual server-config UI.
     return {
@@ -651,6 +677,7 @@ def _config_json():
         "workspace_configured": bool((srv.get("workspace_id") or "").strip()),
         "workspace_id": (srv.get("workspace_id") or "").strip(),
         "calibration": cfg.get("calibration") or {},
+        "secret_storage": secret_storage,
     }
 
 
@@ -692,9 +719,12 @@ def do_grab():
             cfg["server"] = {"auth_cookie": cookie, "workspace_id": ws}
             gw.save_config(cfg)
         except Exception:
-            pass
-    # Phase 2A: persist server-side, but never echo the cookie back to the caller.
-    return {"ok": True, "auth_configured": True, "workspace_configured": bool(ws)}
+            # Phase 2.1: fail closed — the cookie was not persisted anywhere.
+            return {"ok": False, "error": "保存失败：安全存储写入失败"}
+        return {"ok": True, "auth_configured": True, "workspace_configured": True}
+    # Phase 2.1: no workspace discovered -> nothing could be saved; report
+    # truthfully instead of claiming the auth was configured.
+    return {"ok": True, "auth_configured": False, "workspace_configured": False}
 
 
 def _send_json(self, obj, code=200):
@@ -875,6 +905,11 @@ class Handler(BaseHTTPRequestHandler):
                 _send_json(self, {
                     "reader": meta,
                     "range": rng,
+                    # cost basis: raw OpenCode message cost (opencode_message_raw).
+                    # NOT official OpenCode Go quota consumption: no meter ratio,
+                    # no credits, no subscription deduction. Model breakdown below
+                    # uses the exact same raw basis.
+                    "cost_basis": "opencode_message_raw",
                     "agents": gw.agent_stats(rows, cutoff=cutoff, agent_groups=groups),
                 })
             except Exception as e:
@@ -893,14 +928,24 @@ class Handler(BaseHTTPRequestHandler):
             cfg = {}
         if path == "/api/key":
             cfg["api_key"] = (data.get("key") or "").strip()
-            gw.save_config(cfg)
+            try:
+                gw.save_config(cfg)
+            except Exception:
+                # Phase 2.1: fail closed; surface the error instead of dying.
+                _send_json(self, {"ok": False, "error": "保存失败：安全存储写入失败"})
+                return
             _send_json(self, {"ok": True})
         elif path == "/api/server":
             cfg["server"] = {
                 "auth_cookie": (data.get("auth_cookie") or "").strip(),
                 "workspace_id": (data.get("workspace_id") or "").strip(),
             }
-            gw.save_config(cfg)
+            try:
+                gw.save_config(cfg)
+            except Exception:
+                # Phase 2.1: fail closed; surface the error instead of dying.
+                _send_json(self, {"ok": False, "error": "保存失败：安全存储写入失败"})
+                return
             _send_json(self, {"ok": True})
         elif path == "/api/calibrate":
             cal = {}
@@ -914,7 +959,12 @@ class Handler(BaseHTTPRequestHandler):
                     except Exception:
                         pass
             cfg["calibration"] = cal
-            gw.save_config(cfg)
+            try:
+                gw.save_config(cfg)
+            except Exception:
+                # Phase 2.1: fail closed; surface the error instead of dying.
+                _send_json(self, {"ok": False, "error": "保存失败：安全存储写入失败"})
+                return
             _send_json(self, {"ok": True})
         elif path == "/api/sync":
             _send_json(self, do_sync())
@@ -967,6 +1017,7 @@ def auto_sync_loop():
 
 
 def main():
+    atexit.register(_cleanup_runtime_info)
     threading.Thread(target=preheat, daemon=True).start()
     threading.Thread(target=auto_sync_loop, daemon=True).start()
     threading.Thread(target=formula_sync_loop, daemon=True).start()
@@ -974,7 +1025,10 @@ def main():
     actual_port = srv.server_address[1]
     _write_runtime_info(actual_port)
     print(f"[data-server] listening on http://127.0.0.1:{actual_port}/api/state")
-    srv.serve_forever()
+    try:
+        srv.serve_forever()
+    finally:
+        _cleanup_runtime_info()
 
 
 if __name__ == "__main__":

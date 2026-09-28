@@ -30,6 +30,7 @@ __all__ = [
     "load_secrets",
     "save_secrets",
     "store_available",
+    "backend_name",
     "secret_file_path",
 ]
 
@@ -171,6 +172,24 @@ def reset_backend():
 
 def store_available() -> bool:
     return get_backend() is not None
+
+
+def backend_name() -> str:
+    """Return a non-sensitive identifier for the active backend.
+
+    ``"dpapi"`` for the built-in Windows backend, ``"none"`` when no backend
+    is available, a backend-provided ``name`` attribute when present, else
+    ``"custom"``. Never returns secret material.
+    """
+    backend = get_backend()
+    if backend is None:
+        return "none"
+    if isinstance(backend, DPAPIBackend):
+        return "dpapi"
+    name = getattr(backend, "name", None)
+    if isinstance(name, str) and name:
+        return name
+    return "custom"
 
 
 def secret_file_path() -> str:

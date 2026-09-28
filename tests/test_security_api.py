@@ -201,3 +201,58 @@ def test_write_runtime_info(data_server, monkeypatch, tmp_path):
     assert info["pid"] == os.getpid()
     assert isinstance(info["created"], int)
     assert len(info["token"]) >= 43  # token_urlsafe(32) ~= 43 chars
+
+
+# ---------------------------------------------------------------------------
+# Origin: null / evil Origin / bad Host combined with runtime-token auth
+# Runtime auth and the Host/Origin policy are independent boundaries: CORS is
+# not the only thing protecting the API.
+# ---------------------------------------------------------------------------
+def test_origin_null_requires_token(api_server):
+    status, _, body = _raw(api_server + "/api/config", headers={"Origin": "null"})
+    assert status == 401
+    assert json.loads(body) == {"ok": False, "error": "unauthorized"}
+
+
+def test_origin_null_rejects_wrong_token(api_server):
+    status, _, body = _raw(
+        api_server + "/api/config",
+        headers={"Origin": "null", "Authorization": "Bearer not-the-token"},
+    )
+    assert status == 401
+    assert json.loads(body) == {"ok": False, "error": "unauthorized"}
+
+
+def test_origin_null_accepts_valid_token(api_server, api_token):
+    status, headers, body = _raw(
+        api_server + "/api/config",
+        headers=helpers.auth_headers(api_token, {"Origin": "null"}),
+    )
+    assert status == 200
+    assert "api_key_configured" in json.loads(body)
+    assert headers.get("Access-Control-Allow-Origin") == "null"
+    assert headers.get("Access-Control-Allow-Origin") != "*"
+
+
+def test_evil_origin_with_valid_token_forbidden(api_server, api_token):
+    status, _, body = _raw(
+        api_server + "/api/config",
+        headers=helpers.auth_headers(api_token, {"Origin": "https://evil.example"}),
+    )
+    assert status == 403
+    assert json.loads(body) == {"ok": False, "error": "forbidden_origin"}
+
+
+def test_invalid_host_with_valid_token_forbidden(api_server, api_token):
+    port = _port(api_server)
+    conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+    conn.request(
+        "GET",
+        "/api/config",
+        headers={"Host": f"evil.com:{port}", **helpers.auth_headers(api_token)},
+    )
+    resp = conn.getresponse()
+    body = json.loads(resp.read().decode("utf-8"))
+    conn.close()
+    assert resp.status == 403
+    assert body == {"ok": False, "error": "forbidden_host"}

@@ -228,7 +228,12 @@ def test_save_config_backend_unavailable_falls_back_to_plaintext(gw):
     assert cfg["api_key"] == "plain-key-fallback"
 
 
-def test_save_config_store_failure_falls_back_to_plaintext(gw):
+# Phase 2.1: this test used to assert the old silent-plaintext fallback when a
+# store write failed while a backend was available. Writes now fail closed.
+def test_save_config_store_failure_fails_closed(gw):
+    _write_config(gw, {"server": {"workspace_id": "wrk_before"}, "other": 3})
+    before = open(gw.CONFIG_PATH, "rb").read()
+
     class _BadEncrypt:
         def encrypt(self, data):
             raise RuntimeError("nope")
@@ -237,7 +242,11 @@ def test_save_config_store_failure_falls_back_to_plaintext(gw):
             return data
 
     secret_store.set_backend(_BadEncrypt())
-    gw.save_config({"api_key": "plain-on-store-failure", "other": 3})
+    with pytest.raises(secret_store.SecretStoreError):
+        gw.save_config({"api_key": "plain-on-store-failure", "other": 4})
 
-    raw = _read_raw(gw.CONFIG_PATH)
-    assert "plain-on-store-failure" in raw
+    # Phase 2.1: config.json untouched and the secret never lands on disk.
+    with open(gw.CONFIG_PATH, "rb") as fh:
+        assert fh.read() == before
+    assert "plain-on-store-failure" not in _read_raw(gw.CONFIG_PATH)
+    assert not os.path.exists(secret_store.secret_file_path())

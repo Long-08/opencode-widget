@@ -409,28 +409,63 @@ def save_config(cfg):
         cfg = {}
     api_key, cookie = _plaintext_secrets(cfg)
 
-    # Phase 2B: persist secrets in the encrypted store when possible; otherwise
-    # fall back to plaintext config.json (compat mode, no data loss).
-    store_ok = False
+    # Phase 2.1: fail closed. While a secret backend is available, any store
+    # read/write failure propagates as SecretStoreError and config.json is left
+    # untouched — secrets are never silently downgraded to plaintext. The
+    # plaintext compat write remains only when no backend is available.
     if secret_store.store_available():
-        try:
-            stored = secret_store.load_secrets()
-            if api_key:
-                stored["api_key"] = api_key
-            else:
-                stored.pop("api_key", None)
-            if cookie:
-                stored["auth_cookie"] = cookie
-            else:
-                stored.pop("auth_cookie", None)
-            secret_store.save_secrets(stored)
-            store_ok = True
-        except secret_store.SecretStoreError:
-            store_ok = False
+        stored = secret_store.load_secrets()
+        if api_key:
+            stored["api_key"] = api_key
+        else:
+            stored.pop("api_key", None)
+        if cookie:
+            stored["auth_cookie"] = cookie
+        else:
+            stored.pop("auth_cookie", None)
+        secret_store.save_secrets(stored)
+        out = _strip_secret_fields(cfg)
+    else:
+        out = cfg
 
-    out = _strip_secret_fields(cfg) if store_ok else cfg
     with open(CONFIG_PATH, "w", encoding="utf-8") as f:
         json.dump(out, f, ensure_ascii=False, indent=2)
+
+
+def secret_storage_status():
+    """Phase 2.1: non-sensitive secret-storage state for the settings UI.
+
+    Reads the RAW config.json directly (never load_config) so the report cannot
+    recurse into migration/merge logic. Returns only a backend identifier and a
+    status string — never secret values, ciphertext or entropy.
+    """
+    backend = secret_store.backend_name()
+
+    raw = {}
+    if os.path.exists(CONFIG_PATH):
+        try:
+            with open(CONFIG_PATH, "r", encoding="utf-8-sig") as f:
+                raw = json.load(f)
+        except Exception:
+            raw = {}
+    if not isinstance(raw, dict):
+        raw = {}
+    api_key, cookie = _plaintext_secrets(raw)
+    has_plaintext = bool(api_key or cookie)
+
+    if not secret_store.store_available():
+        return {
+            "backend": backend,
+            "status": "insecure_fallback" if has_plaintext else "unavailable",
+        }
+    try:
+        secret_store.load_secrets()
+    except secret_store.SecretStoreError:
+        return {"backend": backend, "status": "migration_failed"}
+    return {
+        "backend": backend,
+        "status": "migration_failed" if has_plaintext else "secure",
+    }
 
 
 def read_auth_cookie_from_webdata():

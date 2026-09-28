@@ -154,3 +154,54 @@ def test_agents_empty_db_explicit_status(api_server, api_token, data_server,
     assert data["agents"] == []
     assert data["reader"]["schema"] == "current"
     assert data["reader"]["status"] == "ok"
+
+
+def test_agents_cost_basis_metadata(api_server, api_token, data_server,
+                                    fixtures_dir, monkeypatch, tmp_path):
+    _save_config(data_server, fixtures_dir)
+    _build_db(
+        data_server, monkeypatch, tmp_path,
+        [{"session_id": "ses_1",
+          "data": helpers.current_assistant_message(created=2000, agent="build", cost=1.0)}],
+        sessions=[{"id": "ses_1", "parent_id": None, "agent": "build"}],
+    )
+    status, data = _get_json(
+        api_server + "/api/agents?range=all",
+        headers=helpers.auth_headers(api_token),
+    )
+    assert status == 200
+    assert data["cost_basis"] == "opencode_message_raw"
+
+
+def test_agents_cost_is_raw_not_meter_adjusted(api_server, api_token, data_server,
+                                               fixtures_dir, monkeypatch, tmp_path):
+    """cost is the raw OpenCode message cost: RATE_DEFAULT (1.4212 for go) must
+    NOT be applied, and the per-model breakdown shares the same raw basis."""
+    _save_config(data_server, fixtures_dir)
+    _build_db(
+        data_server, monkeypatch, tmp_path,
+        [
+            {"session_id": "ses_1",
+             "data": helpers.current_assistant_message(
+                 created=2000, agent="worker", cost=1.0, model_id="model-one")},
+            {"session_id": "ses_1",
+             "data": helpers.current_assistant_message(
+                 created=3000, agent="worker", cost=2.0, model_id="model-two")},
+        ],
+        sessions=[{"id": "ses_1", "parent_id": None, "agent": "worker"}],
+    )
+    status, data = _get_json(
+        api_server + "/api/agents?range=all",
+        headers=helpers.auth_headers(api_token),
+    )
+    assert status == 200
+    worker = {a["agent"]: a for a in data["agents"]}["worker"]
+    # exact raw sum, not 3.0 * 1.4212 (meter ratio)
+    assert worker["cost"] == 3.0
+    assert worker["cost"] != 3.0 * 1.4212
+    # providerID "opencode-go" -> src "go" in the fixture DB
+    models = {m["model"]: m for m in worker["models"]}
+    assert models["model-one"]["cost"] == 1.0
+    assert models["model-two"]["cost"] == 2.0
+    assert models["model-one"]["cost"] != 1.0 * 1.4212
+    assert models["model-two"]["cost"] != 2.0 * 1.4212
