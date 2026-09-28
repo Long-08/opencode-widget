@@ -11,7 +11,11 @@ version:        0.9.0-rc.1          (single source: electron/package.json; Pytho
 packaging mode: portable folder + zip (manual reproducible staging; no auto-updater, no second packager)
 artifact:       dist/opencode-widget-0.9.0-rc.1-win-x64.zip
 size:           144,587,627 bytes (137.89 MB)
-SHA256:         0E32558ADE4085DBC482033440A6CF76A38E6767ACEEF933A45B19C5F8AC86E9
+pre-publication candidate SHA256 (superseded by the final tagged rebuild; NOT release evidence):
+                0E32558ADE4085DBC482033440A6CF76A38E6767ACEEF933A45B19C5F8AC86E9
+final tagged artifact checksum:
+                generated after the source tag is created and recorded outside the tagged
+                tree in dist/SHA256SUMS.txt
 build info:     dist/BUILD_INFO.json {version, commit, built_at}  (no paths/usernames)
 signing:        UNSIGNED (no Authenticode certificate) — Windows SmartScreen may warn; no bypass script provided
 ```

@@ -9,16 +9,23 @@
 ```text
 version:         0.9.0-rc.1   (single source: electron/package.json)
 source tag:      v0.9.0-rc.1
-final commit:    fa6965b4e9bcb0fa31689b7ef6d30d13927bdc7b  (tag v0.9.0-rc.1; a docs-only follow-up commit records the artifact SHA and moves the tag — docs/ is not staged into the artifact, so its bytes are unchanged)
+tagged commit:   the exact commit the v0.9.0-rc.1 tag peels to
+                 (verify: git rev-parse "v0.9.0-rc.1^{}"); docs/ is not staged into
+                 the artifact, so doc-only commits do not change the packaged bytes
 branch:          dev/phase7-release-hardening
 upstream:        https://github.com/ikunops/opencode-widget  (development base 37e399e343789a5e7efd92c5cab626527f2bf05c)
 fork URL:        (not published — see "Publication status")
 ```
 
+The commit actually recorded by the built artifact is written by the build to
+`dist/BUILD_INFO.json` (release output, outside the tagged tree). The
+`scripts/check_provenance.py` guard asserts `HEAD == tag^{} == BUILD_INFO.commit`
+before publication.
+
 ## Validation
 
 ```text
-tests:               594 passed / 0 failed / 0 skipped  (python -m pytest -o addopts="" -q)
+tests:               609 passed / 0 failed / 0 skipped  (594 pre-existing + 15 provenance-guard tests; python -m pytest -o addopts="" -q)
 packaged smoke:      dist/opencode-widget-0.9.0-rc.1/ (staged artifact, not dev Electron)
 PAGE_EVENTS:         []   (no console/CSP/module/page errors)
 console errors:      []
@@ -32,11 +39,17 @@ secret scan:         artifact sanitizer clean (0 forbidden / 0 secret / 0 debug-
 ## Artifact
 
 ```text
-file:       dist/opencode-widget-0.9.0-rc.1-win-x64.zip
-size:       144,588,592 bytes (137.89 MB)
-SHA256:     3E6B4B3D8541E5B8F8E510044811A0C1318D1DE464390712AB044F86EC5D635C
-            (built from tagged commit fa6965b; dist/BUILD_INFO.json records {version, commit, built_at})
-sanitizer:  clean (0 forbidden / 0 secret / 0 debug-hook findings)
+file:                          dist/opencode-widget-0.9.0-rc.1-win-x64.zip
+size:                          144,588,592 bytes (137.89 MB)
+Pre-publication candidate
+SHA256:                        3E6B4B3D8541E5B8F8E510044811A0C1318D1DE464390712AB044F86EC5D635C
+                               (this was a pre-tag candidate built from a commit that the
+                               v0.9.0-rc.1 tag does not point to; it is NOT the final tagged
+                               artifact and must not be published as such)
+sanitizer:                     clean (0 forbidden / 0 secret / 0 debug-hook findings)
+final tagged artifact checksum: generated after the source tag is created and recorded
+                               outside the tagged tree in dist/SHA256SUMS.txt — it is
+                               deliberately not committed back into tagged source
 ```
 
 ## Publication status

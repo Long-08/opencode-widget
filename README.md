@@ -220,6 +220,14 @@ The upstream repository did not include an explicit software license at the time
 new blanket license is asserted over upstream-derived code and no `LICENSE` file is added. Compiled
 binary redistribution therefore waits until upstream licensing/permission is clarified.
 
+### Release status
+
+`v0.9.0-rc.1` is published as a **source** release candidate (Git tag only). No compiled binary is
+distributed publicly: the upstream repository does not yet establish explicit redistribution
+licensing (see **License status** above). A portable Windows build can be produced locally from the
+tagged source; the locally built artifact checksum is recorded outside the tagged source tree so it
+does not become self-referential release metadata.
+
 ### Development
 
 - Run the test suite:
