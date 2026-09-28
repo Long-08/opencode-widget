@@ -11,8 +11,18 @@ import ctypes
 import ctypes.wintypes as wt
 import json
 import os
+import shutil
 import sqlite3
+import sys
 import tempfile
+import time
+
+import runtime_lifecycle as rl
+
+COOKIE_TEMP_SUBDIR = "opencode"
+COOKIE_TEMP_MARKER = rl.COOKIE_TEMP_PREFIX  # "opencode-widget-cookie-"
+LEGACY_COOKIE_PREFIX = "cookie_"
+LEGACY_COOKIE_SUFFIX = ".db"
 
 # ---------------------------------------------------------------- DPAPI
 class _DATA_BLOB(ctypes.Structure):
@@ -255,26 +265,106 @@ def _browser_profiles(browser):
     return profiles
 
 
+def _temp_base_dir():
+    """Base temp directory (env override wins), never a user-data dir."""
+    return os.environ.get("OPENCODE_WIDGET_TMPDIR") or tempfile.gettempdir()
+
+
+def _cookie_temp_dir():
+    """Our own subdir for temporary browser-cookie copies."""
+    return os.path.join(_temp_base_dir(), COOKIE_TEMP_SUBDIR)
+
+
+def _remove_temp_copy(path):
+    """Best-effort delete of a temp cookie copy; generic warning on failure."""
+    try:
+        os.remove(path)
+    except FileNotFoundError:
+        return
+    except Exception:
+        # Never print the path (may contain user information) or any value.
+        try:
+            sys.stderr.write(
+                "opencode-widget: warning: could not remove temporary cookie copy\n")
+        except Exception:
+            pass
+
+
+def _try_remove(path):
+    """Best-effort remove returning True only when a file was deleted."""
+    try:
+        os.remove(path)
+        return True
+    except FileNotFoundError:
+        return False
+    except Exception:
+        return False
+
+
+def _legacy_cookie_name(name):
+    return (isinstance(name, str)
+            and name.startswith(LEGACY_COOKIE_PREFIX)
+            and name.endswith(LEGACY_COOKIE_SUFFIX))
+
+
+def cleanup_stale_cookie_temps(max_age_s=86400):
+    """Remove only OUR stale temp copies; return how many were removed.
+
+    Covers both the current naming (``opencode-widget-cookie-*``) and the
+    legacy ``cookie_*.db`` copies, and only inside our own subdir. Unrelated
+    files and fresh copies are left untouched. Never raises.
+    """
+    tmp_dir = _cookie_temp_dir()
+    now = time.time()
+    removed = 0
+    for path in rl.stale_files(tmp_dir, rl.is_owned_cookie_temp_name, max_age_s, now):
+        if _try_remove(path):
+            removed += 1
+    for path in rl.stale_files(tmp_dir, _legacy_cookie_name, max_age_s, now):
+        if _try_remove(path):
+            removed += 1
+    return removed
+
+
 def _read_cookie(key, cookies_db):
-    """从 cookie 库读取 opencode.ai 的 auth cookie。只读打开，锁定则跳过。"""
+    """从 cookie 库读取 opencode.ai 的 auth cookie。只读打开，锁定则跳过。
+
+    复制到我们自己的临时目录后只读打开；无论成功与否都在 finally 中删除副本。
+    """
     if not os.path.exists(cookies_db):
         return ""
-    tmp = os.path.join(tempfile.gettempdir(), "opencode", "cookie_%s.db" % abs(hash(cookies_db)))
-    import shutil
+    tmp_dir = _cookie_temp_dir()
+    tmp = os.path.join(
+        tmp_dir, "%s%s-%d.db" % (COOKIE_TEMP_MARKER, abs(hash(cookies_db)), os.getpid()))
     try:
-        shutil.copy2(cookies_db, tmp)
-        con = sqlite3.connect("file:%s?mode=ro" % tmp, uri=True)
+        os.makedirs(tmp_dir, exist_ok=True)
     except Exception:
-        return ""
+        pass
+    con = None
+    rows = []
     try:
-        cur = con.cursor()
-        rows = cur.execute(
-            "SELECT host_key, name, encrypted_value FROM cookies "
-            "WHERE name='auth' AND host_key LIKE '%opencode.ai%'").fetchall()
-    except Exception:
-        rows = []
+        try:
+            shutil.copy2(cookies_db, tmp)
+        except Exception:
+            return ""
+        try:
+            con = sqlite3.connect("file:%s?mode=ro" % tmp, uri=True)
+        except Exception:
+            return ""
+        try:
+            cur = con.cursor()
+            rows = cur.execute(
+                "SELECT host_key, name, encrypted_value FROM cookies "
+                "WHERE name='auth' AND host_key LIKE '%opencode.ai%'").fetchall()
+        except Exception:
+            rows = []
     finally:
-        con.close()
+        if con is not None:
+            try:
+                con.close()
+            except Exception:
+                pass
+        _remove_temp_copy(tmp)
     for host, name, enc in rows:
         try:
             plain = _decrypt_cookie_value(key, enc)

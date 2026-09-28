@@ -41,6 +41,7 @@ import views as vw
 import formula_registry as fr
 import observability
 import forecasting
+import runtime_lifecycle as rl
 
 PORT = int(os.environ.get("OPENCODE_WIDGET_PORT") or 8765)
 CACHE = {"state": None, "ts": 0, "lock": threading.Lock()}
@@ -48,6 +49,28 @@ CACHE = {"state": None, "ts": 0, "lock": threading.Lock()}
 # ---- Phase 2A: runtime token + runtime.json ----
 # Token is generated lazily, never logged and never returned by any endpoint.
 _TOKEN = None
+
+# ---- Phase 6A: process lifecycle ----
+# Non-secret instance id: generated once per process, identifies this run in
+# runtime.json. Determined lazily so tests can observe a fresh value.
+_INSTANCE_ID = None
+
+# Epoch seconds of the last successful authenticated request (any endpoint).
+# None until the first auth; the idle watchdog ignores the pre-auth window.
+_LAST_AUTH_SEEN = None
+
+# Idle self-exit: exit after this many seconds without authenticated traffic.
+# 0 (or negative) disables the watchdog entirely.
+TIMEOUT = int(os.environ.get("OPENCODE_WIDGET_IDLE_TIMEOUT_S") or 300)
+IDLE_WATCHDOG_INTERVAL_S = 15
+
+
+def ensure_instance_id():
+    """惰性生成非机密的实例 id (os.urandom(16).hex()), 每进程一次。"""
+    global _INSTANCE_ID
+    if _INSTANCE_ID is None:
+        _INSTANCE_ID = rl.new_instance_id()
+    return _INSTANCE_ID
 
 
 def ensure_runtime_token():
@@ -76,6 +99,7 @@ def _write_runtime_info(port):
             "port": int(port),
             "pid": os.getpid(),
             "created": int(time.time() * 1000),
+            "instance_id": ensure_instance_id(),
         }
         path = os.path.join(directory, "runtime.json")
         tmp = path + ".tmp"
@@ -103,6 +127,76 @@ def _cleanup_runtime_info():
             os.remove(path)
     except Exception:
         pass
+
+
+def _read_runtime_info():
+    """Best-effort parse of runtime.json; None on any failure. Never raises."""
+    try:
+        path = os.path.join(_runtime_dir(), "runtime.json")
+        with open(path, "r", encoding="utf-8") as fh:
+            payload = json.load(fh)
+        return payload if isinstance(payload, dict) else None
+    except Exception:
+        return None
+
+
+def _probe_widget_health(port, timeout=1.0):
+    """Short /api/health probe for an existing instance on 127.0.0.1.<port>."""
+    try:
+        from urllib.request import urlopen
+        url = "http://127.0.0.1:%d/api/health" % int(port)
+        with urlopen(url, timeout=timeout) as resp:
+            code = getattr(resp, "status", None) or resp.getcode()
+            return 200 <= int(code) < 300
+    except Exception:
+        return False
+
+
+def _startup_hygiene():
+    """Best-effort cleanup before serving: never raises, never touches others.
+
+    * remove a stray runtime.json.tmp
+    * remove stale own cookie-temp copies (see browser_cookie)
+    * optional quota_snapshot prune, ONLY when config opts in with a positive
+      integer ``quota_snapshot_retention_days`` (disabled by default)
+    """
+    try:
+        tmp = os.path.join(_runtime_dir(), "runtime.json.tmp")
+        if os.path.exists(tmp):
+            os.remove(tmp)
+    except Exception:
+        pass
+    try:
+        import browser_cookie
+        browser_cookie.cleanup_stale_cookie_temps()
+    except Exception:
+        pass
+    try:
+        if ur is None:
+            return
+        cfg = gw.load_config()
+        days = cfg.get("quota_snapshot_retention_days")
+        if isinstance(days, int) and not isinstance(days, bool) and days > 0:
+            conn = ur.init_remote_db()
+            try:
+                ur.prune_quota_snapshot(conn, days)
+            finally:
+                conn.close()
+    except Exception:
+        pass
+
+
+def _idle_watchdog_loop():
+    """Daemon watchdog: exit cleanly once authenticated traffic goes idle."""
+    while True:
+        time.sleep(IDLE_WATCHDOG_INTERVAL_S)
+        try:
+            if rl.should_exit_idle(time.time(), _LAST_AUTH_SEEN, TIMEOUT):
+                _cleanup_runtime_info()
+                print("[data-server] idle timeout reached; exiting")
+                os._exit(0)
+        except Exception:
+            pass
 
 
 _FORMULA_STORE = vw.FormulaStore(url="")
@@ -885,7 +979,12 @@ class Handler(BaseHTTPRequestHandler):
         if not header.startswith("Bearer "):
             return False
         provided = header[len("Bearer "):].strip()
-        return hmac.compare_digest(provided, ensure_runtime_token())
+        if hmac.compare_digest(provided, ensure_runtime_token()):
+            # Phase 6A: any successful authenticated request counts as heartbeat.
+            global _LAST_AUTH_SEEN
+            _LAST_AUTH_SEEN = time.time()
+            return True
+        return False
 
     def _guard(self, require_auth=True):
         """Return True when the request may proceed; else send the 403/401 JSON."""
@@ -940,6 +1039,11 @@ class Handler(BaseHTTPRequestHandler):
         if not self._guard():
             return
         if path == "/api/state":
+            q = urllib.parse.parse_qs(self.path.split("?")[1]) if "?" in self.path else {}
+            # Phase 6A: lightweight authenticated heartbeat (no state rebuild).
+            if (q.get("heartbeat", [""])[0] or "") == "1":
+                _send_json(self, {"ok": True, "ts": int(time.time() * 1000)})
+                return
             now = time.time()
             with CACHE["lock"]:
                 if CACHE["state"] is None or now - CACHE["ts"] > 30:
@@ -1164,12 +1268,27 @@ def auto_sync_loop():
 
 def main():
     atexit.register(_cleanup_runtime_info)
+    _startup_hygiene()
     threading.Thread(target=preheat, daemon=True).start()
     threading.Thread(target=auto_sync_loop, daemon=True).start()
     threading.Thread(target=formula_sync_loop, daemon=True).start()
-    srv = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
+    try:
+        srv = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
+    except OSError:
+        # Phase 6A: distinguish "our own instance is already running" from a
+        # foreign program squatting on the port. Never kill the other process.
+        info = _read_runtime_info()
+        probe_ok = _probe_widget_health(PORT)
+        if rl.classify_port_conflict(info, probe_ok) == "existing_widget":
+            print("[data-server] widget already running; exiting")
+            return
+        sys.stderr.write(
+            "[data-server] port %d is occupied by another program; exiting\n" % PORT)
+        sys.exit(1)
     actual_port = srv.server_address[1]
     _write_runtime_info(actual_port)
+    if TIMEOUT > 0:
+        threading.Thread(target=_idle_watchdog_loop, daemon=True).start()
     print(f"[data-server] listening on http://127.0.0.1:{actual_port}/api/state")
     try:
         srv.serve_forever()

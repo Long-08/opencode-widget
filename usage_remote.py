@@ -422,6 +422,30 @@ def sync_quota_snapshot(conn, windows, workspace_id):
     return n
 
 
+def prune_quota_snapshot(conn, retention_days, now_ms=None):
+    """删除 quota_snapshot 中超过 retention_days 的历史行, 返回删除行数。
+
+    仅操作 quota_snapshot 一张表; 绝不 VACUUM, 绝不触碰其他表, 绝不打开
+    OpenCode DB。retention_days 非正整数时不做任何事并返回 0。
+    """
+    try:
+        days = int(retention_days)
+    except (TypeError, ValueError):
+        return 0
+    if days <= 0:
+        return 0
+    if now_ms is None:
+        now_ms = _now_ms()
+    try:
+        cutoff = int(now_ms) - days * 24 * 3600 * 1000
+    except (TypeError, ValueError):
+        return 0
+    cur = conn.execute("DELETE FROM quota_snapshot WHERE fetched_at < ?", (cutoff,))
+    n = cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+    conn.commit()
+    return n
+
+
 # ---------------------------------------------------------------------------
 # 读取：转成与本地 rows 相同的结构
 # ---------------------------------------------------------------------------
