@@ -39,6 +39,7 @@ except Exception:
 
 import views as vw
 import formula_registry as fr
+import observability
 
 PORT = int(os.environ.get("OPENCODE_WIDGET_PORT") or 8765)
 CACHE = {"state": None, "ts": 0, "lock": threading.Lock()}
@@ -235,6 +236,38 @@ def run_view(vid, rows):
     with _FORMULA_LOCK:
         engine = _FORMULA_ENGINE
     return engine.execute(vid, rows)
+
+
+# Phase 3: the only valid observability range values; anything else -> "all".
+OBS_RANGES = ("today", "7d", "30d", "all")
+
+
+def _observability_context(rng):
+    """Single-read context shared by every observability endpoint.
+
+    Performs exactly one ``gw.read_opencode_usage()`` and returns
+    ``(meta, rng, filtered_rows, agent_groups)``. ``rng`` is validated here.
+    Reuses the ViewEngine cutoff mechanism (no new date algorithm) and filters
+    with the local timezone boundary.
+    """
+    rng = (rng or "all").lower()
+    if rng not in OBS_RANGES:
+        rng = "all"
+    get_formula()
+    rows, meta = gw.read_opencode_usage()
+    earliest = min((r.get("ts") for r in rows if (r.get("cost") or 0) > 0), default=0)
+    period_start = _subscription_start(earliest)
+    with _FORMULA_LOCK:
+        engine = _FORMULA_ENGINE
+        if engine is not None:
+            engine.period_start_ms = period_start
+    cutoff = engine._cutoff(rng) if engine is not None else None
+    filtered = observability.filter_rows(rows, cutoff, gw.LOCAL_TZ)
+    try:
+        groups = gw.load_config().get("agent_groups") or {}
+    except Exception:
+        groups = {}
+    return meta, rng, filtered, groups
 
 
 def build_state():
@@ -887,21 +920,9 @@ class Handler(BaseHTTPRequestHandler):
                 _send_json(self, {"ok": False, "error": repr(e)}, 500)
         elif path == "/api/agents":
             q = urllib.parse.parse_qs(self.path.split("?")[1]) if "?" in self.path else {}
-            rng = (q.get("range", ["all"])[0] or "all").lower()
-            if rng not in ("today", "7d", "30d", "all"):
-                rng = "all"
             try:
-                get_formula()
-                rows, meta = gw.read_opencode_usage()
-                earliest = min((r["ts"] for r in rows if (r.get("cost") or 0) > 0), default=0)
-                period_start = _subscription_start(earliest)
-                with _FORMULA_LOCK:
-                    engine = _FORMULA_ENGINE
-                    if engine is not None:
-                        engine.period_start_ms = period_start
-                # 复用 ViewEngine 的 range 截止机制, 不新写日期算法
-                cutoff = engine._cutoff(rng) if engine is not None else None
-                groups = gw.load_config().get("agent_groups") or {}
+                rng = (q.get("range", ["all"])[0] or "all").lower()
+                meta, rng, filtered, groups = _observability_context(rng)
                 _send_json(self, {
                     "reader": meta,
                     "range": rng,
@@ -909,8 +930,49 @@ class Handler(BaseHTTPRequestHandler):
                     # NOT official OpenCode Go quota consumption: no meter ratio,
                     # no credits, no subscription deduction. Model breakdown below
                     # uses the exact same raw basis.
-                    "cost_basis": "opencode_message_raw",
-                    "agents": gw.agent_stats(rows, cutoff=cutoff, agent_groups=groups),
+                    "cost_basis": observability.COST_BASIS,
+                    "agents": observability.aggregate_agents(filtered, groups),
+                })
+            except Exception as e:
+                _send_json(self, {"ok": False, "error": repr(e)}, 500)
+        elif path == "/api/models":
+            q = urllib.parse.parse_qs(self.path.split("?")[1]) if "?" in self.path else {}
+            try:
+                rng = (q.get("range", ["all"])[0] or "all").lower()
+                meta, rng, filtered, groups = _observability_context(rng)
+                _send_json(self, {
+                    "reader": meta,
+                    "range": rng,
+                    "cost_basis": observability.COST_BASIS,
+                    "models": observability.aggregate_models(filtered, groups),
+                })
+            except Exception as e:
+                _send_json(self, {"ok": False, "error": repr(e)}, 500)
+        elif path == "/api/providers":
+            q = urllib.parse.parse_qs(self.path.split("?")[1]) if "?" in self.path else {}
+            try:
+                rng = (q.get("range", ["all"])[0] or "all").lower()
+                meta, rng, filtered, groups = _observability_context(rng)
+                _send_json(self, {
+                    "reader": meta,
+                    "range": rng,
+                    "cost_basis": observability.COST_BASIS,
+                    "providers": observability.aggregate_providers(
+                        filtered, groups, gw.SUPPLIER_NAMES),
+                })
+            except Exception as e:
+                _send_json(self, {"ok": False, "error": repr(e)}, 500)
+        elif path == "/api/sessions":
+            q = urllib.parse.parse_qs(self.path.split("?")[1]) if "?" in self.path else {}
+            try:
+                rng = (q.get("range", ["all"])[0] or "all").lower()
+                meta, rng, filtered, groups = _observability_context(rng)
+                _send_json(self, {
+                    "reader": meta,
+                    "range": rng,
+                    "cost_basis": observability.COST_BASIS,
+                    "sessions": observability.aggregate_sessions(filtered, groups),
+                    "tree": observability.build_session_tree(filtered),
                 })
             except Exception as e:
                 _send_json(self, {"ok": False, "error": repr(e)}, 500)
