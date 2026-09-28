@@ -274,7 +274,8 @@ test('cold start settles on mini: smallView shown, resize+save report small', as
   assert.ok(el(app, '#smallView').classList.contains('on'), 'smallView must have .on');
   assert.equal(el(app, '#compactView').style.display, 'none');
   assert.ok(!el(app, '#dashView').classList.contains('on'), 'dashView must be off');
-  assert.ok(app.calls.resize.includes('small'), 'resize("small") reported, calls=' + JSON.stringify(app.calls.resize));
+  assert.equal(app.calls.resize.length, 0,
+    'cold start must not resize: the window is born mini-sized (anti-flicker)');
   assert.equal(app.calls.saveUiState[app.calls.saveUiState.length - 1], 'small');
 });
 

@@ -105,7 +105,7 @@ def test_renderer_default_state_is_small_and_boot_sets_it_without_resize():
 
 def test_mini_view_has_no_ring_no_grid_no_list():
     src = _read(INDEX_HTML)
-    small = _block_after_marker(src, 'id="smallView"')
+    small = src[src.index('id="smallView"'):src.index('id="compactView"')]
     assert 'id="miniBar"' in small, "mini must render the single-row status bar"
     for forbidden in ("ringbox", "sGrid", "sMStats", "m-list"):
         assert forbidden not in small, "mini must not contain %s" % forbidden

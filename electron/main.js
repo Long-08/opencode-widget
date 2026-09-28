@@ -90,8 +90,9 @@ function readRuntimeEnv() {
 }
 
 const SIZES = {
-  small: [540, 260],
-  mid: [560, 480],
+  // Mini 是默认常驻态：细状态条，尽量不挡内容 (见 docs/COMPACT_FLOATING_UX.md)
+  small: [400, 88],
+  mid: [560, 420],
   large: [960, 720],
 };
 
@@ -102,8 +103,8 @@ const SNAP_OUT = 40;
 
 let win = null;
 let snapped = false;
-let curUiState = "mid";     // 前端最近一次上报的 UI 状态 (save-ui-state)
-let preSnapUiState = "mid"; // 吸顶前的 UI 状态, 拖离时恢复
+let curUiState = "small";   // 前端最近一次上报的 UI 状态 (save-ui-state)，默认 Mini
+let preSnapUiState = "small"; // 吸顶前的 UI 状态, 拖离时恢复
 let pendingSnap = null;     // 拖动结束后要落定的状态: "snap" | "restore" | null
 let programmaticMove = false; // 程序化移动(非用户拖拽)期间跳过吸顶判定，避免误吸顶
 
@@ -159,7 +160,7 @@ function restoreFromSnap() {
   if (!win) return;
   // 恢复目标: 吸顶期间用户若手动改过状态(如重新展开大屏)则尊重之, 否则恢复吸顶前状态
   const target = curUiState !== "small" ? curUiState : preSnapUiState;
-  const size = SIZES[target] || SIZES.mid;
+  const size = SIZES[target] || SIZES.small;
   const b = win.getBounds();
   progMove(() => win.setBounds({ x: b.x, y: b.y, width: size[0], height: size[1] }));
   win.webContents.send('snap-restore', target);
@@ -465,10 +466,10 @@ async function terminateOwnedServer() {
 function createWindow() {
   const wa = screen.getPrimaryDisplay().workArea;
   win = new BrowserWindow({
-    width: SIZES.mid[0],
-    height: SIZES.mid[1],
-    x: Math.round((wa.width - SIZES.mid[0]) / 2),
-    y: Math.round((wa.height - SIZES.mid[1]) / 2),
+    width: SIZES.small[0],
+    height: SIZES.small[1],
+    x: Math.round((wa.width - SIZES.small[0]) / 2),
+    y: Math.round((wa.height - SIZES.small[1]) / 2),
     frame: false,
     transparent: true,
     resizable: true,
@@ -561,7 +562,7 @@ app.on('will-quit', (event) => {
 });
 
 ipcMain.handle('resize', (e, uiState) => {
-  const size = SIZES[uiState] || SIZES.mid;
+  const size = SIZES[uiState] || SIZES.small;
   if (!win) return true;
   const bounds = win.getBounds();
   const wa = screen.getDisplayNearestPoint({ x: bounds.x, y: bounds.y }).workArea;

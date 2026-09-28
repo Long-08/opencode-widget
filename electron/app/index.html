@@ -6,7 +6,7 @@
 <title>OpenCode-widget</title>
 <link rel="stylesheet" href="app.css">
 </head>
-<body>
+<body class="mode-small">
 <div class="app">
   <header>
     <div class="brand"><div class="mark">◈</div><span class="title">OpenCode-widget</span></div>
@@ -25,37 +25,20 @@
   </header>
 
   <div class="main">
-    <!-- small (最小化: 圆环 + 供应商/模型 + 迷你统计) -->
-    <div class="small" id="smallView">
-      <div class="s-top">
-        <div class="ringbox">
-          <svg viewBox="0 0 118 118">
-            <circle class="ring ring-track" cx="59" cy="59" r="28"/>
-            <circle class="ring ring-track" cx="59" cy="59" r="41"/>
-            <circle class="ring ring-track" cx="59" cy="59" r="52"/>
-            <circle class="ring ring-badge" cx="59" cy="59" r="18"/>
-            <circle class="ring r0" id="sring0" cx="59" cy="59" r="28"/>
-            <circle class="ring r1" id="sring1" cx="59" cy="59" r="41"/>
-            <circle class="ring r2" id="sring2" cx="59" cy="59" r="52"/>
-          </svg>
-          <div class="rc">
-            <span class="label" id="sLabel">总用量</span>
-            <span class="amount" id="sAmount">—</span>
-          </div>
-          <div class="ring-sub" id="sSub"></div>
-        </div>
-        <div class="s-info">
-          <div class="s-sup" id="sSupplier">OpenCode Go</div>
-          <div class="s-model" id="sModel">—</div>
-          <div class="s-mstats" id="sMStats"></div>
-          <div class="s-reset" id="sReset"></div>
-      <div class="s-grid" id="sGrid"></div>
-        </div>
+    <!-- small (Mini: 默认常驻态, 单行状态条; 点击进入 Compact) -->
+    <div class="small on" id="smallView">
+      <div class="mini-bar" id="miniBar" role="button" tabindex="0" aria-label="OpenCode 用量摘要：点击打开快速查看，用 □ 按钮展开完整面板">
+        <span class="mb-dot" id="miniDot"></span>
+        <span class="mb-name">OCW</span>
+        <span class="mb-item" id="miniPct">—</span>
+        <span class="mb-item" id="miniCost" title="">—</span>
+        <span class="mb-item" id="miniState">…</span>
+        <span class="mb-item" id="miniKey">…</span>
       </div>
     </div>
 
-    <!-- compact -->
-    <div class="compact" id="compactView">
+    <!-- compact (快速查看卡片; JS 接管前内联隐藏, 与 Mini 初始态一致避免闪烁) -->
+    <div class="compact" id="compactView" style="display:none">
       <div class="c-top">
         <div class="ringbox">
           <svg viewBox="0 0 118 118">
