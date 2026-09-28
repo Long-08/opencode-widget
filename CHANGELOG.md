@@ -6,6 +6,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project aims to follow [Semantic Versioning](https://semver.org/).
 The version is defined by a single source of truth: `electron/package.json`.
 
+## [Unreleased]
+
+Post-RC fixes on `main` (the `v0.9.0-rc.1` tag is unchanged):
+
+### Fixed
+
+- Login window: allow navigation to `auth.opencode.ai` and the GitHub / Google
+  OAuth providers, so "Continue with GitHub/Google" no longer does nothing.
+- Login capture: recognize the current console URL (`/console/{ws}`, not only
+  `/workspace/{ws}`) and capture the `__Host-console_session` cookie.
+- Official Go quota sync: the console is now a SPA; fetch
+  `GET /console/api/go/status` (five-hour / weekly / monthly meters) instead of
+  the obsolete SSR scrape, with the legacy scrape kept as fallback. The quota
+  snapshot is persisted independently of the legacy RPC sync.
+- Compact widget: default time range is now **last 7 days** (was today), so it no
+  longer reads 0 right after midnight.
+- Period views (today / 7d / 30d): fall back to local-estimate rows when a source
+  has no official per-record rows, instead of returning 0.
+
+### Changed
+
+- Cold start: a persisted last-known-good formula is used immediately; the cloud
+  refresh runs in the background, and the formula fetch timeout is 2 s.
+
 ## [0.9.0-rc.1] — 2026-09-28
 
 First release candidate. This build is **unsigned** (no Authenticode

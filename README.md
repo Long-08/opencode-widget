@@ -70,6 +70,7 @@ On top of the upstream usage-widget codebase, this fork adds:
 - opt-in forecast-aware notifications and a minimal tray;
 - desktop lifecycle hardening (single instance, server ownership, stale-runtime recovery);
 - an authenticated localhost API and Windows DPAPI secret storage;
+- official Go quota sync against the current OpenCode console (SPA) API;
 - reproducible portable Windows packaging, versioned migrations and release sanitation.
 
 See [UPSTREAM.md](UPSTREAM.md) for the full attribution and licensing note.

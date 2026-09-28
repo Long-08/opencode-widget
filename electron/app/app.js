@@ -66,7 +66,7 @@ let uiState = "mid";   // small | mid | large
 let selModel = null;
 let selSupplier = "go"; // null = 全部
 let heatRange = "30";    // 热力图范围: 7 | 30 | all
-let timeRange = "today"; // 小屏总量时间范围: today | 7 | all
+let timeRange = "7"; // 小屏总量时间范围: today | 7 | all（默认近7天，避免刚跨天时显示 0；按 X 循环切换）
 let lastHover = null;    // 图表最后悬停坐标 {cx, cy}, 切模型后用于刷新 tooltip
 let mFilter = "all";
 let mUnit = "count";

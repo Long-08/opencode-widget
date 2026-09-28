@@ -961,9 +961,13 @@ class ViewEngine:
         view = self.resolve_view(vid)
         cutoff = self._cutoff(view.get("range"))
         scoped = self._scope_rows(rows, view.get("scope"))
-        # 分账: 本期/7天/today 只算登录账号(官方); "全部"含其他账号(本地估算)
+        # 分账: 本期/7天/today 优先只算登录账号(官方); "全部"含其他账号(本地估算)。
+        # 但若该来源完全没有官方行(例如只同步了配额 pct、没有逐条官方记录),
+        # 则回退包含本地估算行, 避免 today/7d 区间视图恒为 0。
         if view.get("range") != "all":
-            scoped = [r for r in scoped if r.get("account") != "other"]
+            official = [r for r in scoped if r.get("account") != "other"]
+            if official:
+                scoped = official
         daily = {}
         for r in scoped:
             d = self._day(r["ts"])
