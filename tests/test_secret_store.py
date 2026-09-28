@@ -250,3 +250,14 @@ def test_save_config_store_failure_fails_closed(gw):
         assert fh.read() == before
     assert "plain-on-store-failure" not in _read_raw(gw.CONFIG_PATH)
     assert not os.path.exists(secret_store.secret_file_path())
+
+
+def test_clean_install_does_not_create_empty_store(gw):
+    """Phase 7: saving a secret-less config on a clean install must not create an
+    empty encrypted store (no unnecessary artifacts)."""
+    assert not os.path.exists(secret_store.secret_file_path())
+    gw.save_config({"formula_enabled": False})
+    assert not os.path.exists(secret_store.secret_file_path())
+    # once a real secret is saved the store is created
+    gw.save_config({"api_key": "dummy-key-value"})
+    assert os.path.exists(secret_store.secret_file_path())

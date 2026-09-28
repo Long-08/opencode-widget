@@ -534,17 +534,28 @@ def save_config(cfg):
     # untouched — secrets are never silently downgraded to plaintext. The
     # plaintext compat write remains only when no backend is available.
     if secret_store.store_available():
-        stored = secret_store.load_secrets()
-        if api_key:
-            stored["api_key"] = api_key
+        has_secret = bool(api_key or cookie)
+        store_exists = True
+        try:
+            store_exists = os.path.exists(secret_store.secret_file_path())
+        except Exception:
+            store_exists = True  # unknown -> keep the normal (fail-closed) path
+        if not has_secret and not store_exists:
+            # Clean install: never create an empty encrypted store just to
+            # persist a config that carries no secrets.
+            out = _with_config_version(_strip_secret_fields(cfg))
         else:
-            stored.pop("api_key", None)
-        if cookie:
-            stored["auth_cookie"] = cookie
-        else:
-            stored.pop("auth_cookie", None)
-        secret_store.save_secrets(stored)
-        out = _with_config_version(_strip_secret_fields(cfg))
+            stored = secret_store.load_secrets()
+            if api_key:
+                stored["api_key"] = api_key
+            else:
+                stored.pop("api_key", None)
+            if cookie:
+                stored["auth_cookie"] = cookie
+            else:
+                stored.pop("auth_cookie", None)
+            secret_store.save_secrets(stored)
+            out = _with_config_version(_strip_secret_fields(cfg))
     else:
         out = cfg
 

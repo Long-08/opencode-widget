@@ -5,6 +5,11 @@ Python 只负责取数/计算，前端与窗口交互交给 Electron (electron/m
 Serves JSON on http://127.0.0.1:8765/api/*
 """
 import atexit
+import sys
+
+# A packaged install directory may be read-only: never write __pycache__ there.
+sys.dont_write_bytecode = True
+
 import json
 import os
 import sqlite3
