@@ -63,16 +63,22 @@ function obsTopModelsHtml(agents) {
   return html;
 }
 
-function obsRenderOverview(panel, data) {
+function obsTimelineSectionHtml() {
+  return '<section class="obs-table-card obs-timeline-card" id="obsOverviewTimeline" '
+    + 'aria-label="Usage timeline"></section>';
+}
+
+function obsRenderOverview(panel, data, errors) {
+  errors = errors || {};
   const agentsResp = (data && data.agents) || {};
   const sessionsResp = (data && data.sessions) || {};
   const state = readerState(agentsResp.reader);
-  if (state !== "ok") {
-    panel.innerHTML = dashStateHtml(readerMessage(state));
+  if (errors.agents || state !== "ok") {
+    panel.innerHTML = dashStateHtml(readerMessage(errors.agents ? "error" : state));
     return;
   }
-  if (sessionsResp.reader && readerState(sessionsResp.reader) !== "ok") {
-    panel.innerHTML = dashStateHtml(readerMessage(readerState(sessionsResp.reader)));
+  if (errors.sessions || (sessionsResp.reader && readerState(sessionsResp.reader) !== "ok")) {
+    panel.innerHTML = dashStateHtml(readerMessage(errors.sessions ? "error" : readerState(sessionsResp.reader)));
     return;
   }
   const agents = agentsResp.agents || [];
@@ -95,9 +101,20 @@ function obsRenderOverview(panel, data) {
       + '</div><div class="ok-v">' + esc(c[1]) + '</div></div>';
   });
   html += '</div>';
+  html += obsTimelineSectionHtml();
   html += obsTopAgentsHtml(agents);
   html += obsTopModelsHtml(agents);
   panel.innerHTML = html;
+
+  const tl = panel.querySelector("#obsOverviewTimeline");
+  if (tl) {
+    const tlResp = (data && data.timeline) || {};
+    renderTimeline(tl, tlResp.series || [], {
+      reader: tlResp.reader,
+      bucket: tlResp.bucket,
+      error: !!errors.timeline,
+    });
+  }
 }
 
 // ---- tab state + registration ----------------------------------------------
@@ -105,6 +122,6 @@ OCW.overview = { sort: "tokens" };
 
 OCW.registerTab("overview", {
   target: function () { return document.querySelector('.obs-panel[data-panel="overview"]'); },
-  render: function (panel, data) { obsRenderOverview(panel, data); },
+  render: function (panel, data, errors) { obsRenderOverview(panel, data, errors); },
   reset: function () {},
 });

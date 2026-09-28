@@ -12,7 +12,7 @@
 const DASH_TABS = ['overview', 'agents', 'models', 'sessions', 'forecast'];
 const DASH_RANGES = ['today', '7d', '30d', 'all'];
 const DASH_ENDPOINTS = {
-  overview: ['agents', 'sessions'],
+  overview: ['agents', 'sessions', 'timeline'],
   agents: ['agents'],
   models: ['models'],
   sessions: ['sessions'],
@@ -40,21 +40,32 @@ function dashShouldFetch(tab, range, cache) {
 }
 
 // Lazy loader: 命中缓存且非 force 时直接返回; 缓存键为 dashCacheKey。
-// 任一 fetch 被 reject 时不写入缓存并向上抛出 (只更新本次涉及的键)。
+// 每个 endpoint 独立 settle: 部分失败时返回可用数据 + errors 映射, 全部失败
+// 才 reject (保持单 endpoint tab 的错误语义不变)。缓存项为 { data, errors }。
 async function dashLoad(tab, range, cache, fetchTab, opts) {
   opts = opts || {};
   const key = dashCacheKey(tab, range);
   const endpoints = dashEndpointsFor(tab);
   if (!opts.force && cache && Object.prototype.hasOwnProperty.call(cache, key)) {
-    return { key: key, fromCache: true, data: cache[key], fetched: [] };
+    return { key: key, fromCache: true, data: cache[key].data, errors: cache[key].errors || {}, fetched: [] };
   }
-  const results = await Promise.all(endpoints.map(function (name) {
-    return Promise.resolve().then(function () { return fetchTab(name, range); });
+  const outcomes = await Promise.all(endpoints.map(function (name) {
+    return Promise.resolve().then(function () { return fetchTab(name, range); })
+      .then(function (value) { return { name: name, ok: true, value: value }; },
+        function (error) { return { name: name, ok: false, error: error }; });
   }));
   const data = {};
-  endpoints.forEach(function (name, i) { data[name] = results[i]; });
-  if (cache) cache[key] = data;
-  return { key: key, fromCache: false, data: data, fetched: endpoints.slice() };
+  const errors = {};
+  let okCount = 0;
+  outcomes.forEach(function (o) {
+    if (o.ok) { data[o.name] = o.value; okCount++; }
+    else errors[o.name] = o.error;
+  });
+  if (endpoints.length && okCount === 0) {
+    throw errors[endpoints[0]] || new Error("all endpoints failed");
+  }
+  if (cache) cache[key] = { data: data, errors: errors };
+  return { key: key, fromCache: false, data: data, errors: errors, fetched: endpoints.slice() };
 }
 
 // 通用升序比较: null/undefined/'' 视为最小值; 数字按数值, 其余按字符串。
@@ -245,6 +256,7 @@ function obsApi(name, range) {
   if (name === "agents") return window.widgetAPI.apiGetAgents(r);
   if (name === "models") return window.widgetAPI.apiGetModels(r);
   if (name === "sessions") return window.widgetAPI.apiGetSessions(r);
+  if (name === "timeline") return window.widgetAPI.apiGetTimeline(r);
   // Forecast is range-independent: the bridge method takes no argument.
   if (name === "forecast") return window.widgetAPI.apiGetForecast();
   return Promise.reject(new Error("unknown endpoint"));
@@ -292,7 +304,7 @@ OCW.obsRenderActiveView = function (tab) {
   if (!desc) return;
   const body = desc.target();
   if (!body) return;
-  desc.render(body, st.data);
+  desc.render(body, st.data, st.errors || {});
 };
 
 const OBS_TAB_LABELS = { agents: "Agent", models: "Model", sessions: "Session", forecast: "Forecast" };
@@ -310,14 +322,15 @@ OCW.obsRenderTab = function (tab) {
     return;
   }
   if (st.status !== "ok") { panel.innerHTML = ""; return; }
-  desc.render(panel, st.data);
+  desc.render(panel, st.data, st.errors || {});
 };
 
 OCW.obsEnsure = async function (tab, force) {
   tab = DASH_TABS.indexOf(tab) >= 0 ? tab : "overview";
   const key = dashCacheKey(tab, OCW.state.range);
   if (!force && OCW.dashCache[key]) {
-    OCW.state.panels[tab] = { status: "ok", data: OCW.dashCache[key] };
+    const cached = OCW.dashCache[key];
+    OCW.state.panels[tab] = { status: "ok", data: cached.data, errors: cached.errors || {} };
     OCW.obsRenderTab(tab);
     return;
   }
@@ -326,7 +339,7 @@ OCW.obsEnsure = async function (tab, force) {
   try {
     const res = await dashLoad(tab, OCW.state.range, OCW.dashCache, obsApi, { force: !!force });
     if (res.key !== dashCacheKey(tab, OCW.state.range)) return; // range 已变化, 丢弃过期结果
-    OCW.state.panels[tab] = { status: "ok", data: res.data };
+    OCW.state.panels[tab] = { status: "ok", data: res.data, errors: res.errors || {} };
     // New data resets per-panel view state (default expansion, no selection).
     const desc = obsTabDescriptor(tab);
     if (desc && desc.reset) desc.reset();

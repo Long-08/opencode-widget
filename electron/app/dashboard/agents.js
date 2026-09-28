@@ -51,7 +51,10 @@ function obsRenderAgents(body, data) {
   html += "</tbody></table></div></div>";
   html += obsAgentDrawerHtml();
   html += "</div>";
+  html += '<div class="obs-matrix-host" id="obsAgentsMatrix"></div>';
   body.innerHTML = html;
+  const mx = body.querySelector("#obsAgentsMatrix");
+  if (mx) renderMatrix(mx, filtered, {});
 }
 
 function obsAgentDrawerHtml() {

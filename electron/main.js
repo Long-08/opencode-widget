@@ -618,10 +618,10 @@ function resolveApiTarget(req) {
     // Forecast: bare path only (range-independent, no query accepted).
     if (p === '/api/forecast') return { method, path: p, body: null };
     if (p === '/api/formula' || p === '/api/formula?refresh=1') return { method, path: p, body: null };
-    if (p === '/api/agents' || p === '/api/models' || p === '/api/providers' || p === '/api/sessions') {
+    if (p === '/api/agents' || p === '/api/models' || p === '/api/providers' || p === '/api/sessions' || p === '/api/timeline') {
       return { method, path: p, body: null };
     }
-    const ar = /^\/api\/(?:agents|models|providers|sessions)\?range=([a-z0-9]+)$/.exec(p);
+    const ar = /^\/api\/(?:agents|models|providers|sessions|timeline)\?range=([a-z0-9]+)$/.exec(p);
     if (ar && API_AGENT_RANGES.has(ar[1])) return { method, path: p, body: null };
     const vm = /^\/api\/view\/([^/?#]+)$/.exec(p);
     if (vm && API_VIEW_ID_RE.test(vm[1])) return { method, path: '/api/view/' + encodeURIComponent(vm[1]), body: null };

@@ -212,6 +212,112 @@ function forecastSections(data) {
   });
 }
 
+// ---- compact forecast bars (Phase 5B) --------------------------------------
+// Pure view-model for the compact visual appended to each window. Statuses and
+// severity come from the API payload only (never recomputed). `projectedPct`
+// is deliberately not clamped: an over-limit projection keeps its real number.
+
+const FORECAST_SEVERITY_COLORS = {
+  warning: "#f59e0b",
+  critical: "#ef4444",
+  neutral: "#6366f1",
+};
+
+function forecastStatusSeverity(status) {
+  if (status === "already_at_limit") return "critical";
+  if (status === "limit_before_reset") return "warning";
+  return "neutral";
+}
+
+// Pick the estimate that carries the most urgent API status; ties fall back to
+// the first key in contract order. No rate is recomputed.
+function forecastProjection(flow, def) {
+  const ests = (flow && flow.estimates) || {};
+  let best = null;
+  let bestRank = -1;
+  for (let i = 0; i < def.rateKeys.length; i++) {
+    const key = def.rateKeys[i][0];
+    const e = ests[key];
+    if (!e) continue;
+    const sev = forecastStatusSeverity(e.status);
+    const rank = sev === "critical" ? 3 : sev === "warning" ? 2 : 1;
+    if (rank > bestRank) { best = e; bestRank = rank; }
+  }
+  return best || {};
+}
+
+function forecastBarFor(def, flow) {
+  flow = flow || {};
+  const official = forecastOfficialModel(flow.official);
+  const officialUnavailable = official.status === "unavailable";
+  const est = forecastProjection(flow, def);
+  const projected = forecastNum(forecastEstimateValue(est, "projected_usage_at_reset", "projected_usage_at_end"));
+  const limit = official.limit;
+  const usedPct = (official.used != null && limit) ? (official.used / limit) * 100 : null;
+  const projectedPct = (projected != null && limit) ? (projected / limit) * 100 : null;
+  const status = officialUnavailable ? "unavailable" : (est.status == null ? null : String(est.status));
+  const ttl = forecastNum(est.time_to_limit_hours);
+  return {
+    key: def.key,
+    title: def.title,
+    status: status,
+    statusLabel: forecastStatusLabel(status),
+    severity: officialUnavailable ? "neutral" : forecastStatusSeverity(status),
+    officialUnavailable: officialUnavailable,
+    usedPct: usedPct,
+    projectedPct: projectedPct,
+    labels: {
+      used: official.usedText,
+      remaining: official.remainingText,
+      limit: official.limitText,
+      reset: official.resetText,
+      projected: forecastFormatNumber(projected),
+      estimatedLimitText: formatDateTime(est.estimated_limit_at),
+      timeToLimit: ttl == null ? "—" : formatDuration(ttl * 3600000),
+    },
+  };
+}
+
+function forecastBars(forecast) {
+  const data = (forecast && forecast.forecast) || forecast || {};
+  return FORECAST_SECTION_DEFS.map(function (def) {
+    return forecastBarFor(def, data[def.flowKey] || {});
+  });
+}
+
+function forecastBarRowHtml(label, pct, valueText, color) {
+  const num = forecastNum(pct);
+  // Visual width only; the numeric value is never clamped.
+  const width = num == null ? 0 : Math.max(0, Math.min(100, num));
+  return '<div class="forecast-bar-row">'
+    + '<span class="forecast-bar-label">' + esc(label) + "</span>"
+    + '<span class="forecast-bar-track"><i style="width:' + esc(width) + "%;background:" + esc(color) + '"></i></span>'
+    + '<span class="forecast-bar-value">' + esc(dashNull(valueText)) + "</span>"
+    + "</div>";
+}
+
+function forecastBarHtml(bar) {
+  if (!bar) return "";
+  const color = FORECAST_SEVERITY_COLORS[bar.severity] || FORECAST_SEVERITY_COLORS.neutral;
+  let html = '<div class="forecast-bar" data-forecast-bar="' + esc(bar.key)
+    + '" data-severity="' + esc(bar.severity) + '">';
+  if (bar.officialUnavailable) {
+    html += '<div class="forecast-bar-unavailable">' + esc("Official quota state unavailable") + "</div>";
+    return html + "</div>";
+  }
+  html += forecastBarRowHtml("Used", bar.usedPct, bar.labels.used, color);
+  html += forecastBarRowHtml("Projected", bar.projectedPct, bar.labels.projected, color);
+  html += '<div class="forecast-bar-meta">'
+    + "<span>" + esc("Limit") + ": " + esc(bar.labels.limit) + "</span>"
+    + "<span>" + esc("Reset") + ": " + esc(bar.labels.reset) + "</span>"
+    + "<span>" + esc("Estimate") + ": " + esc(bar.statusLabel) + "</span>";
+  if (bar.labels.estimatedLimitText && bar.labels.estimatedLimitText !== "—") {
+    html += "<span>" + esc("Estimated limit") + ": " + esc(bar.labels.estimatedLimitText) + "</span>";
+  }
+  html += "</div>";
+  return html + "</div>";
+}
+
 // ---- DOM render (only reached through OCW.registerTab below) ---------------
 
 function forecastMetricHtml(label, value) {
@@ -229,9 +335,10 @@ function forecastOfficialHtml(official) {
   return html + "</div>";
 }
 
-function forecastSectionHtml(sec) {
+function forecastSectionHtml(sec, bar) {
   let html = '<div class="obs-table-card forecast-section" data-forecast-section="' + esc(sec.key) + '">';
   html += "<h4>" + esc(sec.title) + "</h4>";
+  html += forecastBarHtml(bar);
   html += forecastOfficialHtml(sec.official);
   html += '<table class="obs-table forecast-rates"><thead><tr>'
     + "<th>Window</th><th>Status</th><th>Usage</th><th>Rate</th><th>Samples</th>"
@@ -268,7 +375,8 @@ function forecastHtml(data) {
   const resp = (data && data.forecast) || data || {};
   let html = '<div class="forecast-disclaimer" role="note">' + esc(FORECAST_DISCLAIMER) + "</div>";
   html += forecastHeaderHtml(resp);
-  forecastSections(resp).forEach(function (sec) { html += forecastSectionHtml(sec); });
+  const bars = forecastBars(resp);
+  forecastSections(resp).forEach(function (sec, i) { html += forecastSectionHtml(sec, bars[i]); });
   return html;
 }
 
