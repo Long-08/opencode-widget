@@ -6,6 +6,19 @@ observability, usage forecasting and opt-in notifications.
 **Version:** `0.9.0-rc.1` — a release candidate. This RC is **unsigned** (no
 Authenticode certificate). See the SmartScreen note below.
 
+> [!NOTE]
+> This project is a substantially modified fork of
+> [ikunops/opencode-widget](https://github.com/ikunops/opencode-widget).
+> Thanks to [@ikunops](https://github.com/ikunops) for the original project and codebase.
+> See [UPSTREAM.md](UPSTREAM.md) for attribution and licensing notes.
+>
+> 本项目基于 [ikunops/opencode-widget](https://github.com/ikunops/opencode-widget)
+> 进行大幅二次开发，感谢 [@ikunops](https://github.com/ikunops) 提供原始项目与代码基础。
+> 上游来源及许可证说明见 [UPSTREAM.md](UPSTREAM.md)。
+>
+> This is an independent community project and is not affiliated with or endorsed by the OpenCode
+> team. 本项目为独立社区项目，与 OpenCode 官方团队无隶属、赞助或背书关系。
+
 ![OpenCode-widget screenshot](screenshot.png)
 
 ![OpenCode-widget large dashboard](screenshot-large.png)
@@ -31,6 +44,21 @@ Authenticode certificate). See the SmartScreen note below.
   fallback.
 - **Three window sizes**: compact (snapped Dock) / mid / full dashboard, with
   drag-to-top snapping.
+
+### What this fork adds
+
+This is a substantially modified fork. On top of the upstream usage-widget codebase it adds:
+
+- localhost API security hardening (runtime bearer token, Host/Origin policy, no wildcard CORS)
+- Windows DPAPI secret storage with fail-closed writes and fail-safe migration
+- current OpenCode database-schema support
+- Agent / Model / Provider / Session observability
+- usage timeline and Agent × Model visualization
+- deterministic, reset-aware usage forecasting
+- forecast-aware notifications and a minimal tray
+- desktop lifecycle management and portable Windows packaging
+
+See [UPSTREAM.md](UPSTREAM.md) for the full attribution and licensing note.
 
 ### Architecture
 
@@ -177,6 +205,20 @@ Mutable data lives in `%APPDATA%\opencode-widget\`:
   copy stays active (`integrity_status: unsigned`).
 - **Local server unavailable:** the window shows a disconnected state; relaunch
   the launcher to restart the backend.
+
+### Upstream & attribution
+
+This project is a substantially modified fork of
+[ikunops/opencode-widget](https://github.com/ikunops/opencode-widget); the upstream Git history is
+preserved. See [UPSTREAM.md](UPSTREAM.md) for the development base commit and full attribution.
+
+This is an independent community project and is not affiliated with or endorsed by the OpenCode team.
+
+### License status
+
+The upstream repository did not include an explicit software license at the time of this fork, so no
+new blanket license is asserted over upstream-derived code and no `LICENSE` file is added. Compiled
+binary redistribution therefore waits until upstream licensing/permission is clarified.
 
 ### Development
 

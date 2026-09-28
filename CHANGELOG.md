@@ -11,6 +11,8 @@ The version is defined by a single source of truth: `electron/package.json`.
 First release candidate. This build is **unsigned** (no Authenticode
 signature); Windows SmartScreen may warn on first run.
 
+Upstream attribution: based on [ikunops/opencode-widget](https://github.com/ikunops/opencode-widget) (development base commit `37e399e343789a5e7efd92c5cab626527f2bf05c`). See `UPSTREAM.md`; no new blanket license is asserted over upstream-derived code.
+
 ### Security
 
 - Encrypted, user-bound secret storage for the API key and auth cookie via a
