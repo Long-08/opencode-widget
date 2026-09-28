@@ -4,7 +4,7 @@
 > Phase 2D (Slim integration), 2E (forecasting), 2F (UI redesign) were **not started** — see §13.
 >
 > Branch: `dev/phase2-core` · Base: `37e399e` (`main`) · Head: see git log below
-> Tests: **140 passed / 0 failed / 0 skipped** · Smoke: server 12/12 PASS, Electron PASS, login window PASS
+> Tests: **176 passed / 0 failed / 0 skipped** · Smoke: server 12/12 PASS, Electron boundary PASS (renderer token-leak scan empty), login window PASS
 
 Commits (in order):
 
@@ -17,6 +17,8 @@ f5305a7 fix: secure Electron renderer boundaries
 0f88a7b feat: support current OpenCode usage schema
 6ba7597 feat: expose raw agent usage statistics
 909a704 feat: add DPAPI secret storage and fail-safe plaintext migration
+1156062 fix: keep runtime token out of the renderer
+94245c4 feat: secret storage status, fail-closed writes, agent cost basis, token lifecycle
 ```
 
 ---
@@ -150,12 +152,13 @@ Missing fields stay `None`/0 — nothing is guessed.
 
 ## 11. Tests
 
-- **140 passed / 0 failed / 0 skipped** (`python -m pytest -o addopts="" -q`; on this machine redirect `TEMP`/`TMP` because pytest's default basetemp ACL is broken).
+- **176 passed / 0 failed / 0 skipped** (`python -m pytest -o addopts="" -q`; on this machine redirect `TEMP`/`TMP` because pytest's default basetemp ACL is broken).
 - New since the Phase-1 baseline (79): `test_security_api.py` (9), `test_formula_optout.py` (6), `test_opencode_reader.py` (24), `test_agents_api.py` (6), `test_secret_store.py` (16) = **61 new**, plus updates to `test_http_api.py` (token/CORS/config shape), `conftest.py`/`helpers.py` (isolation: runtime dir, secret file, fake backend), `test_provider_mapping.py` (the old "current schema returns []" characterization test was intentionally rewritten — comment: `# Phase 2C: current schema is now supported`).
+- Phase 2.1 additions (26 tests): renderer token-boundary static guards, extracted-`esc()` node:test suite, runtime_env node:test suite (stale pid/missing/corrupt/invalid), secret-storage status matrix + fail-closed writes, runtime token file lifecycle, Origin/Host matrix, agent `cost_basis`.
 - Isolation guarantees unchanged: tmp paths for all user data, stubbed subprocess/browser access, no network (formula fixtures + monkeypatched `urlopen`), ephemeral HTTP port.
 - **Smoke (real environment, minimal)**:
-  - Server (`smoke_server.py`, port 8799): 12/12 PASS — runtime token + pid match, health anonymous, 401 without/wrong token, 200 with token, `reader.schema=current` (814 rows, 0 skipped on the live DB), config flags-only, formula provenance, `/api/agents` 200 (8 agents), Host/CORS behavior.
-  - Electron (CDP): page loaded (`file://.../index.html`), `window.widgetAPI` bridge present, `apiEnv` returned `{base, token}`, renderer `fetch /api/state` → 200 (`reader.schema=current`, 814 rows), `/api/config` → flags-only keys.
+  - Server (`smoke_server.py`, port 8799): 12/12 PASS — runtime token + pid match, health anonymous, 401 without/wrong token, 200 with token, `reader.schema=current` (live DB), config flags-only incl. `secret_storage`, formula provenance, `/api/agents` 200 (9 agents), Host/CORS behavior.
+  - Electron boundary (CDP): page loaded, bridge present, `apiEnv` absent, `apiGetState` → reader current, `apiGetAgents('all')` → 9 agents with `cost_basis=opencode_message_raw`, `apiGetConfig` → flags incl. `secret_storage`, renderer token-leak scan `leaks: []`.
   - Login window: `grabAuth()` opened `https://opencode.ai/auth` (no login completed, no cookies captured).
 
 ## 12. Known Limitations
@@ -179,3 +182,76 @@ Missing fields stay `None`/0 — nothing is guessed.
 - **2E — Forecasting**: 5 h burn rate, remaining-quota projection, threshold alerts.
 - **2F — UI enhancement**: agent dashboard, formula provenance panel, tray/autostart, inline-JS extraction.
 - Also deferred: formula signature/version pinning, Electron devtools flag, P3 hygiene items listed in §12.
+
+## 14. Phase 2.1 — Security Boundary & API Semantics
+
+### 14.1 Runtime token trust boundary
+
+Chain (verified end-to-end):
+
+```
+data_server (generates 256-bit token)
+   -> runtime.json (atomic write, main-process readable only)
+   -> Electron main process
+   -> ipcMain.handle('api-request')  [strict route allowlist]
+   -> authenticated fetch (Authorization: Bearer ...)
+   -> {ok, status, data}  (never contains the token)
+   -> preload per-endpoint method (apiGet*/apiPost*)
+   -> renderer call site
+```
+
+| Question | Answer (verified) |
+|---|---|
+| token in `window` / globalThis? | **No** — it never crosses the IPC boundary; an own-property string scan finds it nowhere |
+| contextBridge direct exposure? | **No** — preload exposes 10 per-endpoint methods; there is no `apiEnv`, no token getter |
+| localStorage / sessionStorage? | **No** — the renderer no longer stores base URL or token |
+| DOM? | **No** — `document.documentElement.outerHTML` scan is clean |
+| console / log / error? | **No** — main never logs the token; errors are generic strings (`forbidden`, `unavailable`, `request_failed`, `http_<status>`) |
+| renderer JS can read the token string? | **No** — E2E check: the smoke script reads `runtime.json` externally, then scans renderer-accessible places; result `leaks: []` |
+| generic `fetch(url, options)` exposed? | **No** — `resolveApiTarget()` allowlists method+path+payload (view-id regex + URL-encode, payload type/length caps); unknown routes return `forbidden` without any network call |
+
+The renderer keeps using 13 controlled `widgetAPI.apiX(...)` call sites with the previous `.catch(...)` defaults.
+
+### 14.2 Threat model
+
+In scope: malicious web pages (cross-origin requests, DNS rebinding), renderer compromise (XSS), accidental exposure (logs, UI echo, DOM), stale-token reuse.
+
+**Out of scope: this project does not attempt to defend against malicious processes already running as the same Windows user.** Such a process can read `runtime.json`, `config.json` and decrypt the DPAPI store as that user regardless of this design.
+
+### 14.3 Runtime token file lifecycle
+
+- Path: `%TEMP%\opencode-widget\runtime.json` (or `OPENCODE_WIDGET_RUNTIME_DIR`); creator: `data_server` at startup; content `{token, port, pid, created}`; ACL inherits the per-user temp directory.
+- Atomic write (`tmp + os.replace`); a new process always generates a new token and overwrites stale files — a stale token is never reused (tested).
+- Electron validates `pid` liveness (`electron/runtime_env.js`, EPERM counts as alive); a stale file is treated as unavailable, best-effort removed, and the retry loop continues.
+- Exit: `atexit` + `finally` call `_cleanup_runtime_info()`, which deletes the file only when its `pid` matches the current process. Hard kills (TerminateProcess) may leave a stale file; it is ignored by the pid check and overwritten on the next start.
+
+### 14.4 Secret storage fallback states
+
+`/api/config` includes `secret_storage: {backend, status}` — never values, ciphertext or entropy:
+
+| status | condition |
+|---|---|
+| `secure` | backend available; store readable; no plaintext secrets remain |
+| `migration_failed` | backend available but protection failed (migration write failed or store unreadable); the fail-safe keeps plaintext so nothing is lost |
+| `insecure_fallback` | no backend (non-Windows) and plaintext secrets present (compat mode) |
+| `unavailable` | no backend and no secrets to protect |
+
+New writes fail closed: with a backend available, a store failure raises `SecretStoreError`, the API returns `{"ok": false, "error": "保存失败：安全存储写入失败"}` and `config.json`/store are untouched — new secrets are never silently downgraded to plaintext. Plaintext fallback remains only for environments without a backend.
+
+### 14.5 Agent cost semantics
+
+- Field: `/api/agents` top-level `cost_basis: "opencode_message_raw"`.
+- Source: raw OpenCode message `cost` values from the local DB (per-agent and per-model breakdown share the basis).
+- Meter adjusted: **no** — `meter.ratio` (1.4212) is not applied.
+- Official quota equivalent: **no** — this is not OpenCode Go quota consumption; credits and subscription deductions are not applied. All billing/quota numbers elsewhere are unchanged.
+
+### 14.6 Origin: `null` rationale
+
+The renderer is a `file://` page; Chromium sends `Origin: null` for its cross-origin requests to `127.0.0.1` (and preflights them). `null` is therefore allowed for the CORS echo, but it is **not** a trust signal: `Origin: null + no/wrong token -> 401`, `Origin: null + valid token -> 200`, `evil Origin + valid token -> 403`, `bad Host + valid token -> 403` (all covered by tests). Runtime auth + Host/Origin policy together are the boundary; CORS is not.
+
+### 14.7 Phase 2.1 tests and smoke
+
+- Suite total: **176 passed / 0 failed / 0 skipped** (150 + 12 renderer-boundary/escaping + 14 server semantics). New: `tests/test_renderer_token_boundary.py`, `tests/test_renderer_escaping.py`, `tests/test_electron_runtime_env.py` (node:test wrapper), `tests/js/runtime_env.test.js` (9), `tests/js/esc.test.js` (3), `tests/test_secret_storage_status.py` (10), `tests/test_runtime_token_file.py` (7), plus Origin/Host matrix and agent cost-basis cases.
+- Escaping cases: `<img src=x onerror=alert(1)>`, `<script>alert(1)</script>`, `"><svg onload=alert(1)>`, `& < > " '` — extracted `esc()` verified via node:test.
+- Smoke (real environment): server 12/12 PASS (reader current, config flags incl. `secret_storage`, agents 9); Electron boundary PASS (`apiEnv` absent, `apiGetState`/`apiGetAgents`/`apiGetConfig` work, **renderer token-leak scan `leaks: []`**); login window PASS.
+
