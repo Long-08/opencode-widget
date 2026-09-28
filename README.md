@@ -1,10 +1,17 @@
 # OpenCode Widget
 
-A transparent Windows desktop widget for OpenCode usage: Go quota, local
-observability, usage forecasting and opt-in notifications.
+**A Windows desktop observability widget for OpenCode** — Agent / Model analytics, a usage
+timeline, explainable quota forecasting, opt-in notifications, and a hardened localhost data
+boundary.
 
-**Version:** `0.9.0-rc.1` — a release candidate. This RC is **unsigned** (no
-Authenticode certificate). See the SmartScreen note below.
+面向 Windows 的 OpenCode 桌面用量与可观测性悬浮窗：Agent / Model 分析、用量趋势、额度预测、
+桌面通知，以及加固的本地数据边界。
+
+![Platform](https://img.shields.io/badge/platform-Windows%2010%20%2F%2011-0078D6?logo=windows&logoColor=white)
+![Electron](https://img.shields.io/badge/Electron-desktop%20shell-47848F?logo=electron&logoColor=white)
+![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)
+![Source RC](https://img.shields.io/badge/Source%20RC-v0.9.0--rc.1-6E56CF)
+![Tests](https://img.shields.io/badge/tests-609%20passing%20%40%20v0.9.0--rc.1-3fb950)
 
 > [!NOTE]
 > This project is a substantially modified fork of
@@ -19,128 +26,156 @@ Authenticode certificate). See the SmartScreen note below.
 > This is an independent community project and is not affiliated with or endorsed by the OpenCode
 > team. 本项目为独立社区项目，与 OpenCode 官方团队无隶属、赞助或背书关系。
 
-![OpenCode-widget screenshot](screenshot.png)
+![Large dashboard: Overview, usage timeline and top agents / models](docs/assets/hero-dashboard.png)
 
-![OpenCode-widget large dashboard](screenshot-large.png)
+## Features
 
----
+- 📊 **Agent / Model observability** — per-agent, per-model, per-provider and per-session usage,
+  token and cost breakdowns computed from your local OpenCode data.
+- 📈 **Usage timeline** — day/hour bucketing plus a GitHub-style heatmap and an
+  **Agent × Model** matrix.
+- 🔮 **Explainable forecasting** — deterministic, reset-aware burn rates and time-to-limit
+  estimates. Every output is labelled `estimate` and is never presented as official.
+- 🔔 **Opt-in notifications** — forecast-aware alerts and a minimal tray menu. **Off by default.**
+- 🪟 **Transparent Windows widget** — compact dock / mid / full dashboard, with drag-to-top
+  snapping.
+- 🔒 **Hardened local security** — read-only OpenCode DB, an authenticated localhost API, and
+  DPAPI-protected secrets (see [Security model](#security-model)).
 
-## English
+## Screenshots
 
-### What it does
+Screenshots are rendered from the current post-RC UI with **synthetic demo data** (no real account,
+workspace, prompt or key material).
 
-- **Transparent floating panel** on the Windows desktop: Go quota (rolling 5h /
-  weekly / monthly percentage + reset countdown), model details, history curves
-  and a GitHub-style heatmap.
-- **Local observability**: per-agent, per-model, per-provider and per-session
-  usage, token and cost statistics computed from your local OpenCode data.
-- **Explainable forecasting**: deterministic, reset-aware burn rates and
-  time-to-limit estimates. Every forecast output is labelled `estimate` and is
-  never presented as official.
-- **Opt-in notifications**: forecast-driven alerts plus a minimal tray menu.
-  Off by default.
-- **Cloud formula**: metering coefficients, supplier rules and view definitions
-  are fetched periodically from a remote formula URL, with last-known-good
-  fallback.
-- **Three window sizes**: compact (snapped Dock) / mid / full dashboard, with
-  drag-to-top snapping.
+### Compact widget
 
-### What this fork adds
+![Compact widget](docs/assets/compact-widget.png)
 
-This is a substantially modified fork. On top of the upstream usage-widget codebase it adds:
+### Agent × Model matrix
 
-- localhost API security hardening (runtime bearer token, Host/Origin policy, no wildcard CORS)
-- Windows DPAPI secret storage with fail-closed writes and fail-safe migration
-- current OpenCode database-schema support
-- Agent / Model / Provider / Session observability
-- usage timeline and Agent × Model visualization
-- deterministic, reset-aware usage forecasting
-- forecast-aware notifications and a minimal tray
-- desktop lifecycle management and portable Windows packaging
+![Agents tab with the Agent × Model matrix](docs/assets/agent-model-matrix.png)
+
+### Forecast
+
+![Forecast dashboard](docs/assets/forecast-notification.png)
+
+## What this fork adds
+
+On top of the upstream usage-widget codebase, this fork adds:
+
+- current OpenCode database-schema support (`session_message` / `session_v2`);
+- Agent / Model / Provider / Session observability;
+- a usage timeline and an **Agent × Model** visualization;
+- deterministic, reset-aware usage forecasting;
+- opt-in forecast-aware notifications and a minimal tray;
+- desktop lifecycle hardening (single instance, server ownership, stale-runtime recovery);
+- an authenticated localhost API and Windows DPAPI secret storage;
+- reproducible portable Windows packaging, versioned migrations and release sanitation.
 
 See [UPSTREAM.md](UPSTREAM.md) for the full attribution and licensing note.
 
-### Architecture
+## Quick start
 
-- A Python **standard-library-only** backend (`data_server.py`) serves a
-  localhost JSON API on `127.0.0.1:8765`.
-- An **Electron shell** (`electron/`) renders the transparent window and talks to
-  the backend through a narrow preload bridge.
-- The Python backend is started by the launcher; quitting the app through the
-  normal path terminates the backend. A single instance is enforced.
+`v0.9.0-rc.1` is a **source** release candidate: the Git tag is public, but no compiled binary is
+distributed (see [Binary availability](#binary-availability)). There are two ways to run it.
 
-### Requirements
+### Run from source
+
+```bash
+git clone https://github.com/Long-08/opencode-widget.git
+cd opencode-widget
+
+# 1) backend (Python 3.11+, standard library only)
+python data_server.py
+
+# 2) Electron shell (Node.js required for source runs)
+cd electron
+npm install
+npm start
+```
+
+The backend listens on `127.0.0.1:8765` by default (override with `OPENCODE_WIDGET_PORT`).
+On first launch it reads your local OpenCode database if present; if the database is missing or
+uses an unsupported schema it shows a reader/empty state instead of failing.
+
+### Local portable RC (not publicly distributed)
+
+You can build the portable Windows folder locally from the tagged source:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-release.ps1
+```
+
+This stages `dist/opencode-widget-0.9.0-rc.1/` and produces
+`dist/opencode-widget-0.9.0-rc.1-win-x64.zip`. It requires system Python 3.11+ and an Electron
+runtime installed under `electron/node_modules/`. Then run the launcher
+`启动 OpenCode Widget.vbs` (recommended — no console flash) or `启动 OpenCode Widget.cmd`.
+
+## Requirements
 
 - **Windows 10 / 11** (x64).
-- **Python 3.11+**, standard library only — no `pip install` is required at
-  runtime.
-- **Node.js / Electron only for development**. The packaged RC embeds Electron;
-  end users do not install Node.
+- **Python 3.11+**, standard library only — no `pip install` is required at runtime.
+- **Node.js** only for source runs or building from source. The packaged RC embeds Electron; end
+  users do not install Node.
 
-### Install (portable)
+## Binary availability
 
-1. Unzip the release folder anywhere (for example under your user profile).
-2. Run the launcher: `启动Go用量悬浮窗.vbs` (recommended — no console flash) or
-   the compatibility entry `启动Go用量悬浮窗.cmd`.
-3. The launcher starts the Python backend and then the Electron shell. There is
-   no installer and no admin requirement.
+A local Windows RC build exists, but compiled binaries are **not currently distributed publicly**
+because the upstream repository does not establish explicit redistribution licensing. The source
+tag is public; the artifact is not.
 
-### Run / first launch
+## Architecture
 
-- On first launch the widget reads your local OpenCode database if present. If
-  the database is missing or uses an unsupported schema, the widget shows a
-  reader/empty state instead of failing.
-- The backend listens on `127.0.0.1:8765` only (localhost, never a public
-  interface).
-- To sync official quota values, use the right-click menu to log in /
-  grab the auth cookie.
-- Optional auto-start: place the launcher in the Startup folder
-  (`Win+R` → `shell:startup`).
-- Quitting normally (tray → Quit, or closing the window) terminates the backend
-  process.
+```text
+OpenCode DB (read-only) ─┐
+                         ▼
+             Python local data service  (standard library only)
+                         │  authenticated localhost API  (127.0.0.1, per-runtime token)
+                         ▼
+             Electron main process  (owns the runtime token)
+                         │  narrow preload bridge  (no token, no generic fetch)
+                         ▼
+                     Renderer UI
+```
 
-### Notifications
+Side paths (optional, never required to run): **official quota sync** (opt-in, uses your own auth
+cookie) and the **remote cloud formula** (pure data, reported as `integrity_status: unsigned`).
 
-- **Off by default.** No notification state is written and nothing is created
-  until you explicitly opt in (tray toggle or the Forecast-tab checkbox).
-- Notifications consume the forecast endpoint only; they never recompute usage
-  or burn rate.
-- Dedupe, cooldown, escalation and quiet hours are applied; notifications are not
-  an audit log.
+The Python backend is started by the launcher; quitting through the normal path terminates it, and
+a single instance is enforced.
 
-### Security model
+## Security model
 
-- The OpenCode database (`~/.local/share/opencode/opencode.db`) is opened
-  **read-only** and is never modified.
-- Secrets (API key, auth cookie) live in a **DPAPI-encrypted `secrets.enc`**,
-  bound to the current Windows user. New secret writes **fail closed**; a failed
-  protection never downgrades to plaintext.
-- The localhost API requires a **per-run random runtime token**
-  (`Authorization: Bearer`) plus **Host and Origin policy**. **CORS is never
-  `*`** — origins are allowlisted or omitted.
-- The **renderer never receives the runtime token or the base URL**, and exposes
-  no generic fetch / settings / notification capability.
-- **Notifications are OFF by default** and are never created without the user
-  opting in.
-- Production defaults: **DevTools off**, **debug logging off**.
+- The OpenCode database is opened **read-only** and is never modified.
+- The localhost API requires a **per-run random runtime token** (`Authorization: Bearer`) plus
+  **Host / Origin policy**; **CORS is never `*`**.
+- The **renderer never receives the runtime token or the base URL**, and exposes no generic
+  fetch / settings / notification capability.
+- Sensitive credentials are protected with **Windows DPAPI** (`secrets.enc`, user-bound); new
+  secret writes **fail closed** and never downgrade to plaintext.
+- **Notifications are opt-in** and are never created without explicit user action.
+- **Prompt / response content is not exposed** by the observability APIs.
 
-#### Remote formula trust model
+Full details, including the remote-formula trust model and its scope limits, are documented in
+[`docs/PHASE7_RELEASE_HARDENING.md`](docs/PHASE7_RELEASE_HARDENING.md).
 
-- The cloud formula is **pure data — no code is executed**. The client enforces
-  **HTTPS**, a **strict schema + version compatibility check**, a **size cap**, a
-  **fetch timeout**, **last-known-good fallback** and **atomic adoption**.
-- **No cryptographic signature is verified.** The formula is reported as
-  `integrity_status: unsigned`. HTTPS protects transport, **not** content
-  authorship — do not read HTTPS as content signing.
+## Forecast semantics
 
-#### Scope note
+> Forecasts are estimates based on observed usage and available official quota state. They are not
+> guaranteed predictions.
 
-This project does not defend against malicious processes already running as the
-same Windows user; such a process can read the runtime token and decrypt the
-per-user secret store. The controls above harden the normal path, they are not a
-same-user sandbox.
+Every forecast row is labelled `estimate`; the widget never presents a forecast as an official
+value.
 
-### Data paths
+## About “Raw Cost”
+
+> Raw Cost reflects OpenCode message-record cost data and is not the same as official Go quota
+> consumption.
+
+Raw Cost is shown for transparency in the local analytics views. Official quota state (when you
+opt in to sync) is tracked separately.
+
+## Data, privacy and lifecycle
 
 Mutable data lives in `%APPDATA%\opencode-widget\`:
 
@@ -152,270 +187,204 @@ Mutable data lives in `%APPDATA%\opencode-widget\`:
 | `server_usage.db` | legacy official-data ledger mirror |
 | `formula_cache.json` | last-known-good cloud formula |
 
-- Legacy in-repo copies of these files migrate into `%APPDATA%\opencode-widget\`
-  automatically **once**; the originals are kept.
-- The data directory can be overridden with `OPENCODE_WIDGET_DATA_DIR` (portable
-  or embedded deployments).
-- **Runtime token file:** `%TEMP%\opencode-widget\runtime.json` (per-run token,
-  port, pid, instance id).
-- **Notification state:** Electron `userData` (`notification_state.json`).
-- **Debug log:** `%TEMP%\widget_snap.log` — **debug builds only**.
+- Only **local usage metadata** is processed, plus **official quota sync** when you opt in.
+- The runtime token file is `%TEMP%\opencode-widget\runtime.json` (per-run token, port, pid).
+- Legacy in-repo copies migrate into the data dir **once**; the originals are kept.
+- **Upgrade:** replace the folder and keep `%APPDATA%\opencode-widget`; migrations are versioned
+  and fail-safe. There is **no auto-updater**.
+- **Uninstall:** delete the app folder. User data in `%APPDATA%\opencode-widget\` is kept unless
+  you remove it manually.
+- **Notifications are off by default**; notifications are not an audit log.
 
-### Privacy
+## Development
 
-- Only **local usage metadata** is collected, plus **official quota sync** when
-  you opt in.
-- **Prompt / response content is never exposed** by the observability APIs.
+```bat
+set TEMP=%LOCALAPPDATA%\Temp\opencode
+set TMP=%TEMP%
+python -m pytest -o addopts="" -q
+```
 
-### Upgrade
+**609 automated tests passing at the RC source tag `v0.9.0-rc.1`.** Tag provenance is checked by
+`scripts/check_provenance.py` (asserts `HEAD == tag^{} == BUILD_INFO.commit`).
 
-- Replace the binaries (unzip over the folder). Keep
-  `%APPDATA%\opencode-widget` — your config, secrets and history are preserved.
-- Migrations are **versioned and fail-safe**: a failed migration never destroys
-  existing data.
-- There is **no auto-updater**; upgrades are manual.
+Git remotes for this fork:
 
-### Uninstall
+```bash
+git remote -v
+# origin    https://github.com/Long-08/opencode-widget.git   (this fork)
+# upstream  https://github.com/ikunops/opencode-widget.git   (original project)
+```
 
-1. Delete the application folder.
-2. Your user data in `%APPDATA%\opencode-widget\` is **kept** unless you remove
-   it. To remove it manually, delete `%APPDATA%\opencode-widget\` (this removes
-   `config.json`, `secrets.enc`, `usage_remote.db`, `server_usage.db` and
-   `formula_cache.json`).
-3. Optionally delete `%TEMP%\opencode-widget\runtime.json` and, in debug builds,
-   `%TEMP%\widget_snap.log`.
-
-### Troubleshooting
-
-- **Missing OpenCode database:** the widget shows an empty/reader state; make
-  sure OpenCode has been used at least once and the database exists.
-- **Unsupported database schema:** the reader reports the schema as unsupported
-  rather than guessing; update OpenCode or the widget.
-- **Port occupied (`8765`):** startup fails clearly and **never kills the other
-  process**. If the occupant is this widget's own backend, the existing instance
-  is reused; otherwise choose a different port via the port environment
-  override.
-- **Official sync unavailable:** quota values fall back to the last local state;
-  retry from the menu.
-- **Notifications unsupported / not firing:** notifications are off by default —
-  opt in first, and check quiet hours.
-- **Tray icon missing:** Windows may hide new tray icons in the overflow area;
-  check there before assuming failure.
-- **Formula fallback:** if the remote formula is unreachable, the last-known-good
-  copy stays active (`integrity_status: unsigned`).
-- **Local server unavailable:** the window shows a disconnected state; relaunch
-  the launcher to restart the backend.
-
-### Upstream & attribution
+## Upstream & attribution
 
 This project is a substantially modified fork of
 [ikunops/opencode-widget](https://github.com/ikunops/opencode-widget); the upstream Git history is
 preserved. See [UPSTREAM.md](UPSTREAM.md) for the development base commit and full attribution.
+Screenshot provenance is recorded there as well.
 
-This is an independent community project and is not affiliated with or endorsed by the OpenCode team.
+This is an independent community project and is not affiliated with or endorsed by the OpenCode
+team.
 
-### License status
+## License status
 
-The upstream repository did not include an explicit software license at the time of this fork, so no
-new blanket license is asserted over upstream-derived code and no `LICENSE` file is added. Compiled
-binary redistribution therefore waits until upstream licensing/permission is clarified.
+The upstream repository did not include an explicit software license at the time of this fork, so
+no new blanket license is asserted over upstream-derived code and **no `LICENSE` file is added**.
+Compiled binary redistribution therefore waits until upstream licensing/permission is clarified.
 
-### Release status
+## Release status
 
-`v0.9.0-rc.1` is published as a **source** release candidate (Git tag only). No compiled binary is
-distributed publicly: the upstream repository does not yet establish explicit redistribution
-licensing (see **License status** above). A portable Windows build can be produced locally from the
-tagged source; the locally built artifact checksum is recorded outside the tagged source tree so it
-does not become self-referential release metadata.
+`v0.9.0-rc.1` is published as a **source** release candidate — a Git tag, not a stable release and
+not a binary download. It is intended for validation before a stable release. See the
+[`v0.9.0-rc.1` source tag](https://github.com/Long-08/opencode-widget/tree/v0.9.0-rc.1).
 
-### Development
-
-- Run the test suite:
-
-  ```bat
-  python -m pytest -o addopts="" -q
-  ```
-
-  Expected: all tests pass (461 passed when this RC was cut).
-- Node/Electron is only needed to work on `electron/`; run `npm install` inside
-  `electron/` first.
-- If pytest cannot access its temp base directory, point `TEMP`/`TMP` at a
-  writable folder before running, for example:
-
-  ```bat
-  set TEMP=%LOCALAPPDATA%\Temp\opencode
-  set TMP=%TEMP%
-  python -m pytest -o addopts="" -q
-  ```
-
-### SmartScreen note
-
-`0.9.0-rc.1` is an **unsigned** release candidate — it carries no Authenticode
-signature, so **Windows SmartScreen may warn** when you run it for the first
-time. This is expected for an unsigned RC. **Never use a script or workaround to
-bypass OS security warnings**; if you do not trust the build, do not run it.
+> `v0.9.0-rc.1` is **unsigned** (no Authenticode certificate), so Windows SmartScreen may warn when
+> you run a local build. **Never use a script or workaround to bypass OS security warnings**; if you
+> do not trust a build, do not run it.
 
 ---
 
 ## 中文
 
-### 功能简介
+### 项目定位
 
-一个透明的 Windows 桌面悬浮窗，展示 OpenCode 用量：Go 配额、本地可观测性、
-用量预测与可选通知。
+面向 Windows 的 OpenCode 桌面用量与可观测性悬浮窗：**Agent / Model 分析、用量趋势、额度预测、
+桌面通知**，以及加固的本地数据边界。
 
-**版本：** `0.9.0-rc.1`（发布候选版，**未签名**，无 Authenticode 证书）。
+### 核心能力
 
-- **透明悬浮窗**：Go 配额（滚动 5h / 每周 / 每月百分比 + 重置倒计时）、模型
-  明细、历史曲线与 GitHub 风格热力图。
-- **本地可观测性**：按 Agent / 模型 / 供应商 / 会话统计用量、Token 与费用。
-- **可解释预测**：确定性的、感知重置的速率与“距耗尽时间”估算，所有预测结果均
-  标记为 `estimate`，绝不当作官方值。
-- **可选通知**：基于预测的提醒 + 最小托盘菜单，**默认关闭**。
-- **云端公式**：计量系数、供应商规则与视图定义定期从远程公式 URL 拉取，失败时
-  保留上一版（last-known-good）。
-- **三档窗口**：最小屏（吸顶 Dock）/ 中屏 / 大屏仪表盘，支持拖到顶部吸附。
+- 📊 **Agent / Model 可观测性**：按 Agent / 模型 / 供应商 / 会话统计用量、Token 与费用。
+- 📈 **用量趋势**：按天/小时聚合、GitHub 风格热力图，以及 **Agent × Model** 矩阵。
+- 🔮 **可解释预测**：确定性的、感知重置的速率与“距耗尽时间”估算，全部标记为 `estimate`，
+  绝不当作官方值。
+- 🔔 **可选通知**：基于预测的提醒 + 最小托盘菜单，**默认关闭**。
+- 🪟 **透明悬浮窗**：最小 Dock / 中窗 / 大屏三档，支持拖到顶部吸附。
+- 🔒 **加固的本地安全**：只读数据库、需要运行时 token 的本机 API、DPAPI 机密保护。
 
-### 架构
+### 截图
 
-- Python **仅用标准库**的后端（`data_server.py`）在本机 `127.0.0.1:8765`
-  提供 JSON API。
-- **Electron 外壳**（`electron/`）负责透明窗口，并经最小化的 preload 桥访问
-  后端。
-- 后端由启动器拉起；正常退出会终止后端进程；强制单实例。
+截图来自当前 RC 之后的界面，使用**合成演示数据**（不含真实账户、workspace、提示词或密钥）。
+
+- 大屏仪表盘：`docs/assets/hero-dashboard.png`
+- 最小悬浮窗：`docs/assets/compact-widget.png`
+- Agent × Model 矩阵：`docs/assets/agent-model-matrix.png`
+- 预测面板：`docs/assets/forecast-notification.png`
+
+### 相对上游新增
+
+在保留上游历史与归属的前提下，本 fork 增加了：当前 OpenCode 数据库 schema 支持
+（`session_message` / `session_v2`）、Agent / Model / Provider / Session 可观测性、用量趋势与
+Agent × Model 可视化、感知重置的用量预测、可选预测通知与最小托盘、单实例与生命周期加固、
+需要 token 的本机 API 与 Windows DPAPI 机密存储、可复现的绿色版打包与版本化迁移 / 发布清洗。
+
+### 快速开始
+
+`v0.9.0-rc.1` 是**源码**发布候选：Git tag 公开，但**不公开分发编译好的二进制**。
+
+源码运行：
+
+```bash
+git clone https://github.com/Long-08/opencode-widget.git
+cd opencode-widget
+python data_server.py          # 后端，Python 3.11+，仅标准库
+cd electron && npm install && npm start   # Electron 外壳（源码运行需要 Node）
+```
+
+本地构建绿色版（不公开分发）：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-release.ps1
+```
+
+构建后在 `dist/opencode-widget-0.9.0-rc.1/` 中运行 `启动 OpenCode Widget.vbs`。
 
 ### 环境要求
 
 - **Windows 10 / 11**（x64）。
 - **Python 3.11+**，仅标准库，运行时无需 `pip install`。
-- **Node.js / Electron 仅用于开发**；打包后的 RC 已内置 Electron，最终用户无需
-  安装 Node。
+- **Node.js** 仅在源码运行或自行构建时需要；打包版已内置 Electron。
 
-### 安装（绿色版）
+### 二进制可用性
 
-1. 将发布目录解压到任意位置。
-2. 运行启动器：`启动Go用量悬浮窗.vbs`（推荐，无黑框）或兼容入口
-   `启动Go用量悬浮窗.cmd`。
-3. 启动器先启动 Python 后端，再启动 Electron 外壳。无需安装、无需管理员权限。
+本地已构建 Windows RC，但因上游未明确再分发许可，**当前不公开分发编译产物**。源码 tag 公开，
+二进制不公开。
 
-### 运行 / 首次启动
+### 架构
 
-- 首次启动会读取本地 OpenCode 数据库；若数据库缺失或 schema 不受支持，会显示
-  空状态/读取状态，而不是直接失败。
-- 后端仅监听 `127.0.0.1:8765`（本机，不对外）。
-- 如需同步官方配额，使用右键菜单登录 / 抓取 Cookie。
-- 可选开机自启：把启动器放入启动文件夹（`Win+R` → `shell:startup`）。
-- 正常退出（托盘 → 退出，或关闭窗口）会终止后端进程。
+```text
+OpenCode 数据库（只读）
+        │
+        ▼
+Python 本地数据服务（仅标准库）
+        │  需要 token 的本机 API（127.0.0.1，每次运行随机 token）
+        ▼
+Electron 主进程（持有运行时 token）
+        │  最小 preload 桥（不下发 token、无通用 fetch）
+        ▼
+渲染层 UI
+```
 
-### 通知
-
-- **默认关闭**：在你明确开启（托盘开关或 Forecast 标签页复选框）之前，不会写入
-  任何通知状态，也不会创建通知。
-- 通知只消费预测接口，不重算用量或速率。
-- 应用去重、冷却、升级与免打扰；通知不是审计日志。
+旁路（可选，非运行必需）：**官方配额同步**（需用户开启，使用自己的 auth cookie）与**远程云端
+公式**（纯数据，`integrity_status: unsigned`）。
 
 ### 安全模型
 
-- OpenCode 数据库（`~/.local/share/opencode/opencode.db`）以**只读**方式打开，
-  **永不修改**。
-- 机密（API Key、auth cookie）保存在 **DPAPI 加密的 `secrets.enc`** 中，绑定当前
-  Windows 用户；新的机密写入**失败即关闭（fail closed）**，不会降级为明文。
-- 本机 API 需要**每次运行随机生成的运行时 token**（`Authorization: Bearer`），
-  并配合 **Host 与 Origin 策略**；**CORS 从不为 `*`**。
-- **渲染进程永远拿不到运行时 token 和 base URL**，也没有通用 fetch / 设置 /
-  通知能力。
-- **通知默认关闭**，未获用户明确开启绝不创建。
-- 生产默认：**DevTools 关闭**、**调试日志关闭**。
+- OpenCode 数据库以**只读**方式打开，永不修改。
+- 本机 API 需要**每次运行随机生成的 token** 与 **Host / Origin 策略**，**CORS 从不为 `*`**。
+- **渲染进程拿不到运行时 token 和 base URL**，也没有通用 fetch / 设置 / 通知能力。
+- 机密以 **Windows DPAPI**（用户绑定）保存，新写入**失败即关闭**，不降级明文。
+- **通知默认关闭**，未获明确开启绝不创建。
+- 可观测性 API **不暴露提示词 / 响应内容**。
 
-#### 远程公式信任模型
+详见 [`docs/PHASE7_RELEASE_HARDENING.md`](docs/PHASE7_RELEASE_HARDENING.md)。
 
-- 云端公式是**纯数据，不执行任何代码**。客户端强制 **HTTPS**、**严格的 schema
-  与版本兼容校验**、**大小上限**、**拉取超时**、**last-known-good 回退**与
-  **原子替换**。
-- **不校验任何密码学签名**，`integrity_status` 为 `unsigned`。HTTPS 只保护传输，
-  **不等于对内容来源的签名**。
+### 预测语义
 
-#### 范围说明
+> 预测是基于已观测用量与可用官方配额状态的估算，**不保证**未来结果。
 
-本项目不防御“已经以同一 Windows 用户身份运行的恶意进程”；这类进程可以读取运行时
-token 并以该用户身份解密机密库。上述措施加固的是正常路径，而非同用户沙箱。
+所有预测均标记为 `estimate`。
 
-### 数据路径
+### 关于 “Raw Cost”
 
-可变数据位于 `%APPDATA%\opencode-widget\`：
+> Raw Cost 反映 OpenCode 消息记录中的费用数据，**不等同于官方 Go 配额消耗**。
 
-| 文件 | 内容 |
-|------|------|
-| `config.json` | 非机密配置 |
-| `secrets.enc` | DPAPI 加密机密（绑定 Windows 用户） |
-| `usage_remote.db` | 官方同步账本镜像 |
-| `server_usage.db` | 旧版官方数据账本镜像 |
-| `formula_cache.json` | 云端公式 last-known-good |
+### 数据与生命周期
 
-- 仓库内旧位置的这些文件会**自动迁移一次**到 `%APPDATA%\opencode-widget\`，
-  原文件保留。
-- 数据目录可用 `OPENCODE_WIDGET_DATA_DIR` 覆盖（便携 / 嵌入式场景）。
-- **运行时 token 文件：** `%TEMP%\opencode-widget\runtime.json`（本次运行的
-  token / 端口 / pid / 实例 id）。
-- **通知状态：** Electron `userData`（`notification_state.json`）。
-- **调试日志：** `%TEMP%\widget_snap.log`（仅调试构建）。
+可变数据位于 `%APPDATA%\opencode-widget\`（配置、DPAPI 机密、官方同步账本、云端公式缓存）。
+运行时 token 文件为 `%TEMP%\opencode-widget\runtime.json`。升级用新版本覆盖并保留
+`%APPDATA%\opencode-widget`；迁移分版本、失败安全；无自动更新器。卸载删除应用目录即可，用户
+数据默认保留。
 
-### 隐私
+### 开发与上游
 
-- 只采集**本地用量元数据**；在你开启后，另加**官方配额同步**。
-- 可观测性 API **绝不暴露提示词 / 响应内容**。
+```bat
+set TEMP=%LOCALAPPDATA%\Temp\opencode
+set TMP=%TEMP%
+python -m pytest -o addopts="" -q
+```
 
-### 升级
+**`v0.9.0-rc.1` 源码 tag 处 609 项测试全部通过。**
 
-- 用新版本覆盖解压即可，保留 `%APPDATA%\opencode-widget`，配置、机密与历史都会
-  保留。
-- 迁移是**分版本、失败安全**的：迁移失败不会破坏已有数据。
-- **没有自动更新器**，升级需手动。
+```bash
+git remote -v
+# origin    https://github.com/Long-08/opencode-widget.git   （本 fork）
+# upstream  https://github.com/ikunops/opencode-widget.git   （上游原项目）
+```
 
-### 卸载
+本项目基于 [ikunops/opencode-widget](https://github.com/ikunops/opencode-widget) 进行大幅二次
+开发，并保留上游 Git 历史；完整归属与开发基点见 [UPSTREAM.md](UPSTREAM.md)。
 
-1. 删除应用目录。
-2. `%APPDATA%\opencode-widget\` 中的用户数据默认**保留**；如需彻底清除，请手动
-   删除该目录（会一并删除 `config.json`、`secrets.enc`、`usage_remote.db`、
-   `server_usage.db`、`formula_cache.json`）。
-3. 可选：删除 `%TEMP%\opencode-widget\runtime.json`，以及调试构建下的
-   `%TEMP%\widget_snap.log`。
+本项目为独立社区项目，与 OpenCode 官方团队无隶属、赞助或背书关系。
 
-### 疑难排查
+### 许可证状态
 
-- **找不到 OpenCode 数据库：** 显示空状态；请确认 OpenCode 至少使用过一次且
-  数据库存在。
-- **数据库 schema 不受支持：** 读取器会明确报告不支持，而不是猜测。
-- **端口被占用（`8765`）：** 启动会明确失败，**绝不结束其它进程**；若占用者就是本
-  悬浮窗后端，则复用现有实例，否则可通过端口环境变量改用其它端口。
-- **官方同步不可用：** 回退到最近一次本地状态，可稍后重试。
-- **通知未触发：** 通知默认关闭，请先开启，并检查免打扰设置。
-- **托盘图标不见了：** Windows 可能把新图标收进溢出区，先检查那里。
-- **公式回退：** 远程公式不可达时，保留 last-known-good（`integrity_status:
-  unsigned`）。
-- **本机服务不可用：** 窗口显示断开状态，重新运行启动器以重启后端。
+上游仓库在本 fork 创建时未包含明确的软件许可证，因此本仓库不对上游衍生的代码主张新的整体开源
+许可，也**不添加 `LICENSE` 文件**。编译产物的再分发需待上游明确许可 / 授权后再考虑。
 
-### 开发
+### 发布状态
 
-- 运行测试：
+`v0.9.0-rc.1` 以**源码**发布候选发布（仅 Git tag，非稳定版、非二进制下载），用于稳定版之前的
+验证。tag 页面：
+[`v0.9.0-rc.1`](https://github.com/Long-08/opencode-widget/tree/v0.9.0-rc.1)。
 
-  ```bat
-  python -m pytest -o addopts="" -q
-  ```
-
-  预期：全部通过（本 RC 截定时为 461 passed）。
-- 只有在开发 `electron/` 时才需要 Node/Electron；先在 `electron/` 内执行
-  `npm install`。
-- 若 pytest 无法访问其临时目录，先把 `TEMP`/`TMP` 指向可写目录，例如：
-
-  ```bat
-  set TEMP=%LOCALAPPDATA%\Temp\opencode
-  set TMP=%TEMP%
-  python -m pytest -o addopts="" -q
-  ```
-
-### SmartScreen 提示
-
-`0.9.0-rc.1` 是**未签名**的发布候选版，没有 Authenticode 签名，首次运行时
-**Windows SmartScreen 可能弹出警告**——这对未签名 RC 是正常现象。
-**不要使用任何脚本或手段绕过操作系统的安全警告**；若你不信任该构建，请不要运行。
+> `v0.9.0-rc.1` **未签名**（无 Authenticode 证书），本地运行时 SmartScreen 可能提示。
+> **不要使用任何脚本或手段绕过系统安全警告**；若不信任构建，请不要运行。

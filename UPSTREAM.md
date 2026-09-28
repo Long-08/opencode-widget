@@ -22,6 +22,15 @@ architecture. This fork keeps the upstream Git history intact and builds on it.
 - desktop lifecycle management (single instance, server ownership, stale-runtime recovery)
 - release hardening and portable Windows packaging
 
+## Screenshot / asset provenance
+
+- `screenshot.png`, `screenshot-large.png` — screenshots that came with the preserved upstream
+  history. They are kept unchanged for attribution and are **not** used as the current README hero.
+- `docs/assets/hero-dashboard.png`, `docs/assets/compact-widget.png`,
+  `docs/assets/agent-model-matrix.png`, `docs/assets/forecast-notification.png` — generated from the
+  **current post-RC UI** using synthetic demo data only (no real account, workspace, prompt, token
+  or key material).
+
 ## Licensing note
 
 At the time this fork was prepared, the upstream repository did **not** contain an explicit software
