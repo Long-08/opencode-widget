@@ -13,6 +13,7 @@
 | 3 | Agent Observability Backend | **COMPLETE** |
 | 4 | Forecasting | PLANNED |
 | 5A | Observability Dashboard UI | **COMPLETE** |
+| 5.1 | Frontend structure cleanup (no behavior change) | **COMPLETE** |
 | 5B | Advanced visualization (charts) | PLANNED |
 | 6 | Desktop UX & Hygiene | PLANNED |
 
@@ -64,6 +65,10 @@ Planned only (no production code in Phase 3):
 Models / Sessions with shared range state, lazy per-tab loading, in-memory cache, agent/model
 detail panels, session tree, explicit Raw Cost semantics, and reader/empty/error states.
 See `docs/PHASE5_DASHBOARD_UI.md`.
+
+**Phase 5.1 — Frontend structure cleanup — COMPLETE.** The dashboard was split out of
+`index.html` into `app.css` + `app.js` + `dashboard/*.js` classic-script modules with no
+behavior change; see `docs/PHASE5_1_FRONTEND_STRUCTURE.md`.
 
 **Phase 5B (PLANNED):** advanced visualization (charts in Agent/Model detail) and a Forecast
 screen once Phase 4 exists. Providers remains a filter/detail dimension, not a standalone tab.
