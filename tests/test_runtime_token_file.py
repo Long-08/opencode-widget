@@ -3,9 +3,15 @@
 Isolation comes from the autouse conftest fixture: OPENCODE_WIDGET_RUNTIME_DIR
 is redirected to a per-test tmp directory, so these tests never touch a real
 runtime file. Callers reset data_server._TOKEN to simulate a fresh startup.
+
+Phase 6A adds the lightweight authenticated heartbeat endpoint.
 """
 import json
 import os
+import urllib.error
+import urllib.request
+
+import helpers
 
 RUNTIME_FILE = "runtime.json"
 
@@ -33,13 +39,17 @@ def test_write_runtime_info_contents(data_server, monkeypatch):
     path = _runtime_path(data_server)
     assert os.path.exists(path)
     info = _read_json(path)
-    assert set(info) == {"token", "port", "pid", "created"}
+    assert set(info) == {"token", "port", "pid", "created", "instance_id"}
     assert isinstance(info["token"], str)
     assert len(info["token"]) >= 43  # secrets.token_urlsafe(32)
     assert info["token"] == data_server._TOKEN
     assert info["port"] == 4321
     assert info["pid"] == os.getpid()
     assert isinstance(info["created"], int)
+    # Phase 6A: non-secret instance id (128-bit hex), never a token.
+    assert set(info["instance_id"]) <= set("0123456789abcdef")
+    assert len(info["instance_id"]) == 32
+    assert info["instance_id"] != info["token"]
 
 
 def test_write_runtime_info_overwrites_stale_file_with_new_token(data_server, monkeypatch):
@@ -128,3 +138,56 @@ def test_cleanup_runtime_info_corrupt_file_is_untouched(data_server):
 
     assert os.path.exists(path)
     assert open(path, "r", encoding="utf-8").read() == "{not valid json"
+
+
+# ---------------------------------------------------------------------------
+# Phase 6A: lightweight authenticated heartbeat
+# ---------------------------------------------------------------------------
+def _raw_get(url):
+    req = urllib.request.Request(url, method="GET")
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return resp.status, resp.read().decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as e:
+        return e.code, e.read().decode("utf-8", errors="replace")
+
+
+def test_state_heartbeat_requires_token(api_server):
+    status, body = _raw_get(api_server + "/api/state?heartbeat=1")
+    assert status == 401
+    assert json.loads(body) == {"ok": False, "error": "unauthorized"}
+
+
+def test_state_heartbeat_is_lightweight(
+    api_server, api_token, data_server, fixtures_dir, monkeypatch
+):
+    data_server.gw.save_config(
+        {"formula_url": os.path.join(fixtures_dir, "formula_valid.json")}
+    )
+
+    def _boom():
+        raise AssertionError("heartbeat must not rebuild state")
+
+    monkeypatch.setattr(data_server, "build_state", _boom)
+
+    status, data = helpers.http_get_json(
+        api_server + "/api/state?heartbeat=1",
+        headers=helpers.auth_headers(api_token),
+    )
+    assert status == 200
+    assert data["ok"] is True
+    assert isinstance(data["ts"], int)
+    # no full state payload
+    assert "windows" not in data
+    assert "stats" not in data
+
+
+def test_authenticated_request_touches_last_auth_seen(api_server, api_token, data_server, monkeypatch):
+    monkeypatch.setattr(data_server, "_LAST_AUTH_SEEN", None)
+
+    status, _ = helpers.http_get(
+        api_server + "/api/config", headers=helpers.auth_headers(api_token)
+    )
+
+    assert status == 200
+    assert isinstance(data_server._LAST_AUTH_SEEN, float)
