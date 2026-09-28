@@ -3,6 +3,7 @@
 Checks the preload bridge's exposed surface, the main-process api-request proxy,
 and that the renderer has no token/base/Authorization plumbing at all.
 """
+import glob
 import os
 import re
 
@@ -10,7 +11,9 @@ TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_DIR = os.path.dirname(TESTS_DIR)
 PRELOAD_JS = os.path.join(PROJECT_DIR, "electron", "preload.js")
 MAIN_JS = os.path.join(PROJECT_DIR, "electron", "main.js")
-INDEX_HTML = os.path.join(PROJECT_DIR, "electron", "app", "index.html")
+APP_DIR = os.path.join(PROJECT_DIR, "electron", "app")
+INDEX_HTML = os.path.join(APP_DIR, "index.html")
+APP_JS = os.path.join(APP_DIR, "app.js")
 
 EXPECTED_WIDGET_API = {
     # pre-existing bridge methods, unchanged
@@ -162,6 +165,8 @@ def test_main_api_request_result_never_contains_token():
 
 
 def test_renderer_has_no_token_surface():
-    src = _read(INDEX_HTML)
-    for needle in ("apiEnv", "API_BASE", "API_TOKEN", "Bearer ", "runtime.json"):
-        assert needle not in src, f"renderer still references {needle!r}"
+    files = [INDEX_HTML, APP_JS] + sorted(glob.glob(os.path.join(APP_DIR, "dashboard", "*.js")))
+    for path in files:
+        src = _read(path)
+        for needle in ("apiEnv", "API_BASE", "API_TOKEN", "Bearer ", "runtime.json"):
+            assert needle not in src, "%s still references %r" % (path, needle)

@@ -1,7 +1,7 @@
 // Phase 2.1: escaping regression test for the renderer's esc() helper.
-// The helper is defined inline in electron/app/index.html; extract it with a
-// brace-balancing scan (its replace map contains {} so a naive regex fails),
-// eval it, then assert that data-derived HTML is neutralised.
+// Since Phase 5.1 the helper lives in electron/app/dashboard/format.js; extract
+// it with a brace-balancing scan (its replace map contains {} so a naive regex
+// fails), eval it, then assert that data-derived HTML is neutralised.
 //   node --test tests/js/esc.test.js
 'use strict';
 
@@ -10,13 +10,13 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const INDEX_HTML = path.resolve(__dirname, '..', '..', 'electron', 'app', 'index.html');
+const FORMAT_JS = path.resolve(__dirname, '..', '..', 'electron', 'app', 'dashboard', 'format.js');
 
 // Return the full `const esc = ...;` statement, tracking brace depth so the
 // object literal inside .replace(...) does not terminate the scan early.
 function extractEscStatement(src) {
   const start = src.indexOf('const esc =');
-  assert.ok(start >= 0, 'esc() definition not found in index.html');
+  assert.ok(start >= 0, 'esc() definition not found in format.js');
   let depth = 0;
   let i = start;
   for (; i < src.length; i++) {
@@ -33,7 +33,7 @@ function extractEscStatement(src) {
   return src.slice(start, semi + 1);
 }
 
-const escStatement = extractEscStatement(fs.readFileSync(INDEX_HTML, 'utf8'));
+const escStatement = extractEscStatement(fs.readFileSync(FORMAT_JS, 'utf8'));
 // eslint-disable-next-line no-eval
 const esc = eval(escStatement + '\nesc');
 

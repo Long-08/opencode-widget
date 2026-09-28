@@ -1,7 +1,8 @@
 // Phase 5A: shared dashboard core regression/unit suite.
-// The DOM-free `phase5a-core` block lives inline in electron/app/index.html.
-// Extract it (plus the renderer's esc() helper it depends on) with a
-// brace-balancing scan, eval it, and assert the display/sort/fetch contract.
+// Since Phase 5.1 the DOM-free core lives in electron/app/dashboard/core.js
+// (the esc()/formatter helpers it depends on live in dashboard/format.js).
+// Read both files in dependency order, eval them, and assert the
+// display/sort/fetch contract.
 //   node --test tests/js/dashboard_core.test.js
 'use strict';
 
@@ -10,29 +11,10 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const INDEX_HTML = path.resolve(__dirname, '..', '..', 'electron', 'app', 'index.html');
-const SRC = fs.readFileSync(INDEX_HTML, 'utf8');
-
-// Return the full `const esc = ...;` statement (brace-balanced; the replace map
-// contains {} so a naive regex terminates early).
-function extractEscStatement(src) {
-  const start = src.indexOf('const esc =');
-  assert.ok(start >= 0, 'esc() definition not found in index.html');
-  let depth = 0;
-  let i = start;
-  for (; i < src.length; i++) {
-    const ch = src[i];
-    if (ch === '{') depth++;
-    else if (ch === '}') {
-      depth--;
-      if (depth === 0) break;
-    }
-  }
-  assert.ok(i < src.length, 'unbalanced braces while extracting esc()');
-  const semi = src.indexOf(';', i);
-  assert.ok(semi > i, 'statement terminator not found for esc()');
-  return src.slice(start, semi + 1);
-}
+const FORMAT_JS = path.resolve(__dirname, '..', '..', 'electron', 'app', 'dashboard', 'format.js');
+const CORE_JS = path.resolve(__dirname, '..', '..', 'electron', 'app', 'dashboard', 'core.js');
+const FORMAT_SRC = fs.readFileSync(FORMAT_JS, 'utf8');
+const CORE_SRC = fs.readFileSync(CORE_JS, 'utf8');
 
 function extractCore(src) {
   const startMarker = '/* ==== phase5a-core:start ====';
@@ -55,8 +37,8 @@ const CORE_NAMES = [
 
 // eslint-disable-next-line no-eval
 const core = eval(
-  extractEscStatement(SRC)
-  + '\n' + extractCore(SRC)
+  FORMAT_SRC
+  + '\n' + extractCore(CORE_SRC)
   + '\n({' + CORE_NAMES.join(',') + '})'
 );
 

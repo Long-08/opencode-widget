@@ -1,8 +1,7 @@
 // Phase 5A: Agents/Models/Sessions dashboard view-model suite.
-// The DOM-free `phase5a-views` block lives inline in electron/app/index.html,
-// after the `phase5a-core` block it depends on. Extract esc() (+ core + views)
-// with the same brace-balanced scan used by the other renderer suites, eval
-// them in order, and assert the display/view-model contract.
+// Since Phase 5.1 the view-models live in electron/app/dashboard/views.js,
+// after the format.js/core.js files they depend on. Read all three in order,
+// eval them, and assert the display/view-model contract.
 //   node --test tests/js/dashboard_views.test.js
 'use strict';
 
@@ -11,29 +10,12 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const INDEX_HTML = path.resolve(__dirname, '..', '..', 'electron', 'app', 'index.html');
-const SRC = fs.readFileSync(INDEX_HTML, 'utf8');
-
-// Return the full `const esc = ...;` statement (brace-balanced; the replace map
-// contains {} so a naive regex terminates early).
-function extractEscStatement(src) {
-  const start = src.indexOf('const esc =');
-  assert.ok(start >= 0, 'esc() definition not found in index.html');
-  let depth = 0;
-  let i = start;
-  for (; i < src.length; i++) {
-    const ch = src[i];
-    if (ch === '{') depth++;
-    else if (ch === '}') {
-      depth--;
-      if (depth === 0) break;
-    }
-  }
-  assert.ok(i < src.length, 'unbalanced braces while extracting esc()');
-  const semi = src.indexOf(';', i);
-  assert.ok(semi > i, 'statement terminator not found for esc()');
-  return src.slice(start, semi + 1);
-}
+const FORMAT_JS = path.resolve(__dirname, '..', '..', 'electron', 'app', 'dashboard', 'format.js');
+const CORE_JS = path.resolve(__dirname, '..', '..', 'electron', 'app', 'dashboard', 'core.js');
+const VIEWS_JS = path.resolve(__dirname, '..', '..', 'electron', 'app', 'dashboard', 'views.js');
+const FORMAT_SRC = fs.readFileSync(FORMAT_JS, 'utf8');
+const CORE_SRC = fs.readFileSync(CORE_JS, 'utf8');
+const VIEWS_SRC = fs.readFileSync(VIEWS_JS, 'utf8');
 
 function extractMarked(src, startMarker, endMarker, label) {
   const start = src.indexOf(startMarker);
@@ -62,9 +44,9 @@ const VIEW_NAMES = [
 
 // eslint-disable-next-line no-eval
 const v = eval(
-  extractEscStatement(SRC)
-  + '\n' + extractCore(SRC)
-  + '\n' + extractViews(SRC)
+  FORMAT_SRC
+  + '\n' + extractCore(CORE_SRC)
+  + '\n' + extractViews(VIEWS_SRC)
   + '\n({' + VIEW_NAMES.join(',') + '})'
 );
 
