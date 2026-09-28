@@ -879,10 +879,11 @@ class ViewEngine:
         if r == "30d":
             # "本期": 截止 = 当前订阅周期起始 (订阅日); 订阅日未知时回退字面30天
             if self.period_start_ms:
-                return datetime.fromtimestamp(self.period_start_ms / 1000, timezone.utc).strftime("%Y-%m-%d")
-            today = datetime.now(timezone.utc) - timedelta(days=29)
+                return datetime.fromtimestamp(self.period_start_ms / 1000, self.local_tz).strftime("%Y-%m-%d")
+            today = datetime.now(self.local_tz) - timedelta(days=29)
             return today.strftime("%Y-%m-%d")
-        today = datetime.now(timezone.utc)
+        # 区间边界与 _day() 使用同一本地时区，避免 UTC 日期导致 "今天" 滞后。
+        today = datetime.now(self.local_tz)
         if r == "7d":
             today = today - timedelta(days=6)
         return today.strftime("%Y-%m-%d")
