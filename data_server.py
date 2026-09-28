@@ -40,6 +40,7 @@ except Exception:
 import views as vw
 import formula_registry as fr
 import observability
+import timeline
 import forecasting
 import runtime_lifecycle as rl
 
@@ -363,6 +364,33 @@ def _observability_context(rng):
     except Exception:
         groups = {}
     return meta, rng, filtered, groups
+
+
+def _timeline_context(rng):
+    """Single-read context for ``/api/timeline`` (Phase 5B).
+
+    Performs exactly one ``gw.read_opencode_usage()`` and returns
+    ``(meta, rng, filtered_rows, cutoff, earliest_ms)``. It mirrors
+    ``_observability_context`` exactly for the range validation, formula
+    engine and ``_cutoff`` semantics (no new "today" definition), and adds the
+    cutoff string plus the earliest row ts (epoch ms, over all rows) needed to
+    plan an "all" window.
+    """
+    rng = (rng or "all").lower()
+    if rng not in OBS_RANGES:
+        rng = "all"
+    get_formula()
+    rows, meta = gw.read_opencode_usage()
+    earliest_paid = min((r.get("ts") for r in rows if (r.get("cost") or 0) > 0), default=0)
+    period_start = _subscription_start(earliest_paid)
+    with _FORMULA_LOCK:
+        engine = _FORMULA_ENGINE
+        if engine is not None:
+            engine.period_start_ms = period_start
+    cutoff = engine._cutoff(rng) if engine is not None else None
+    filtered = observability.filter_rows(rows, cutoff, gw.LOCAL_TZ)
+    earliest_all = min((r.get("ts") for r in rows if r.get("ts") is not None), default=0)
+    return meta, rng, filtered, cutoff, earliest_all
 
 
 def build_state():
@@ -1154,6 +1182,26 @@ class Handler(BaseHTTPRequestHandler):
                     "cost_basis": observability.COST_BASIS,
                     "sessions": observability.aggregate_sessions(filtered, groups),
                     "tree": observability.build_session_tree(filtered),
+                })
+            except Exception as e:
+                _send_json(self, {"ok": False, "error": repr(e)}, 500)
+        elif path == "/api/timeline":
+            q = urllib.parse.parse_qs(self.path.split("?")[1]) if "?" in self.path else {}
+            try:
+                rng = (q.get("range", ["all"])[0] or "all").lower()
+                meta, rng, filtered, cutoff, earliest_ms = _timeline_context(rng)
+                now_ms = int(time.time() * 1000)
+                plan, _buckets, series = timeline.build_timeline(
+                    filtered, rng, cutoff, now_ms, earliest_ms, gw.LOCAL_TZ)
+                _send_json(self, {
+                    "reader": meta,
+                    "range": rng,
+                    "cost_basis": timeline.COST_BASIS,
+                    "bucket": {
+                        "unit": plan["unit"],
+                        "seconds": plan["size_ms"] // 1000,
+                    },
+                    "series": series,
                 })
             except Exception as e:
                 _send_json(self, {"ok": False, "error": repr(e)}, 500)
