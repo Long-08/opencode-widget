@@ -40,6 +40,7 @@ except Exception:
 import views as vw
 import formula_registry as fr
 import observability
+import forecasting
 
 PORT = int(os.environ.get("OPENCODE_WIDGET_PORT") or 8765)
 CACHE = {"state": None, "ts": 0, "lock": threading.Lock()}
@@ -541,13 +542,14 @@ def _latest_server_quota():
     try:
         conn = sqlite3.connect(db)
         rows = conn.execute("""
-            SELECT kind, label, pct, reset_text
+            SELECT kind, label, pct, reset_text, fetched_at
             FROM quota_snapshot
             WHERE fetched_at = (SELECT MAX(fetched_at) FROM quota_snapshot)
             ORDER BY CASE kind WHEN 'session' THEN 0 WHEN 'weekly' THEN 1 ELSE 2 END
         """).fetchall()
         conn.close()
-        return [{"kind": r[0], "label": r[1], "pct": r[2], "reset_text": r[3]} for r in rows]
+        return [{"kind": r[0], "label": r[1], "pct": r[2], "reset_text": r[3],
+                 "fetched_at": r[4]} for r in rows]
     except Exception:
         return []
 
@@ -570,6 +572,81 @@ def _apply_server_quota(windows, applied_credits=0):
         w["pct"] = pct
         w["reset"] = sw["reset_text"]
         w["calibrated"] = True
+
+
+# ---- Phase 4: /api/forecast ----
+# 本地窗口估算兜底: 官方 reset_text 无法解析时才使用, 并显式标注来源。
+_FORECAST_LOCAL_WINDOW_MS = 30 * 24 * 3600 * 1000
+
+
+def _local_reset_estimate(kind, now_ms, period_start):
+    if kind == "session":
+        return now_ms + gw.SESSION_MS
+    if kind == "weekly":
+        return gw.week_bounds(now_ms)[1]
+    if period_start:
+        return gw.month_bounds(now_ms, period_start)[1]
+    return now_ms + _FORECAST_LOCAL_WINDOW_MS
+
+
+def _forecast_official(srv_rows, kind, now_ms, period_start):
+    """官方 quota 状态 (used/remaining/limit 的第一事实来源)。
+
+    有 snapshot: used = limit * pct/100; reset 优先官方 reset_text, 无法解析时
+    回退本地窗口估算并标注 reset_source="local_window_estimate"。
+    无 snapshot: status="unavailable", used/remaining 为 None (绝不臆造)。
+    """
+    limit = gw.limit_for(kind)
+    local_reset = _local_reset_estimate(kind, now_ms, period_start)
+    snap = next((r for r in (srv_rows or []) if r.get("kind") == kind), None)
+    if not snap:
+        return {"status": "unavailable", "used": None, "remaining": None,
+                "limit": limit, "reset_at": local_reset,
+                "reset_source": "local_window_estimate"}
+    try:
+        pct = float(snap.get("pct") or 0.0)
+    except Exception:
+        pct = 0.0
+    used = limit * pct / 100.0
+    remaining = max(0.0, limit - used)
+    reset_at = None
+    reset_source = "local_window_estimate"
+    offset = forecasting.parse_reset_text(snap.get("reset_text"))
+    fetched_at = snap.get("fetched_at")
+    if offset is not None and fetched_at:
+        reset_at = int(fetched_at) + offset
+        reset_source = "official_reset_text"
+    if reset_at is None:
+        reset_at = local_reset
+    return {"status": "ok", "used": used, "remaining": remaining,
+            "limit": limit, "reset_at": reset_at, "reset_source": reset_source}
+
+
+def build_forecast_state():
+    """单次 DB 读取 + 官方 quota 第一事实来源 -> 预测响应 (加 reader meta)。"""
+    get_formula()
+    rows, meta = gw.read_opencode_usage()
+    now_ms = int(time.time() * 1000)
+    # 折算口径与 gw.build_windows 完全一致 (cost>0, 非 go 子集镜像, 非其他账号)
+    records = []
+    for r in rows:
+        cost = r.get("cost") or 0.0
+        src = r.get("src")
+        if cost > 0 and src not in gw.SUBSET_SRCS and r.get("account") != "other":
+            usage = cost * gw.rate_for(gw.norm_model(r.get("model") or ""), src)
+            records.append({"ts": int(r.get("ts") or 0), "usage": usage})
+    earliest = min((r.get("ts") for r in rows if (r.get("cost") or 0) > 0), default=0)
+    period_start = _subscription_start(earliest)
+    srv_rows = _latest_server_quota()
+    result = forecasting.build_forecast(
+        records, now_ms,
+        _forecast_official(srv_rows, "session", now_ms, period_start),
+        _forecast_official(srv_rows, "weekly", now_ms, period_start),
+        _forecast_official(srv_rows, "monthly", now_ms, period_start),
+        period_start or None,
+    )
+    result["reader"] = meta
+    return result
 
 
 # 本地-官方逐条匹配窗口(ms): 自己账号的记录应与官方同模型记录时间接近
@@ -974,6 +1051,13 @@ class Handler(BaseHTTPRequestHandler):
                     "sessions": observability.aggregate_sessions(filtered, groups),
                     "tree": observability.build_session_tree(filtered),
                 })
+            except Exception as e:
+                _send_json(self, {"ok": False, "error": repr(e)}, 500)
+        elif path == "/api/forecast":
+            # Phase 4: deterministic estimate; no range param. Official quota
+            # state is the first fact source (never re-derived from raw cost).
+            try:
+                _send_json(self, build_forecast_state())
             except Exception as e:
                 _send_json(self, {"ok": False, "error": repr(e)}, 500)
         else:
