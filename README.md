@@ -37,8 +37,9 @@ boundary.
 - 🔮 **Explainable forecasting** — deterministic, reset-aware burn rates and time-to-limit
   estimates. Every output is labelled `estimate` and is never presented as official.
 - 🔔 **Opt-in notifications** — forecast-aware alerts and a minimal tray menu. **Off by default.**
-- 🪟 **Transparent Windows widget** — compact dock / mid / full dashboard, with drag-to-top
-  snapping.
+- 🪟 **Transparent Windows widget** — always-on mini status bar (default), quick-view card and
+  full dashboard on demand, with drag-to-top snapping (see
+  [`docs/COMPACT_FLOATING_UX.md`](docs/COMPACT_FLOATING_UX.md)).
 - 🔒 **Hardened local security** — read-only OpenCode DB, an authenticated localhost API, and
   DPAPI-protected secrets (see [Security model](#security-model)).
 
