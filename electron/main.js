@@ -1,9 +1,12 @@
-const { app, BrowserWindow, ipcMain, screen, session } = require('electron');
+const { app, BrowserWindow, ipcMain, screen, session, Tray, Menu, nativeImage } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const runtimeEnv = require('./runtime_env');
 const runtimeManager = require('./runtime_manager');
+const notificationPolicy = require('./notification_policy');
+const notificationManagerModule = require('./notification_manager');
+const trayManager = require('./tray_manager');
 
 // Phase 6A: diagnostics are opt-in (OPENCODE_WIDGET_DEBUG=1|true). In production
 // devTools is off and snap logging is a no-op.
@@ -228,6 +231,188 @@ function stopHeartbeat() {
   if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
 }
 
+// Phase 6B: opt-in, forecast-aware notifications. Default OFF. This layer only
+// consumes the server's /api/forecast; it never recomputes burn rate or
+// time-to-limit. The manager is created after window creation and stopped first
+// on quit. The renderer only ever sees validated settings over a narrow IPC.
+const NOTIFICATION_DEFAULT_INTERVAL_MS = 900 * 1000; // 15 minutes
+const NOTIFICATION_MIN_INTERVAL_MS = 15 * 60 * 1000;
+let notificationManager = null;
+
+// State file: env override (debug/tests) else Electron userData.
+function notificationStatePath() {
+  const override = process.env.OPENCODE_WIDGET_NOTIFY_STATE;
+  if (typeof override === 'string' && override.trim()) return override;
+  try {
+    return path.join(app.getPath('userData'), 'notification_state.json');
+  } catch (_) {
+    return path.join(os.tmpdir(), 'opencode-widget-notification_state.json');
+  }
+}
+
+function notificationIntervalMs() {
+  const raw = Number(process.env.OPENCODE_WIDGET_NOTIFY_INTERVAL_S);
+  if (Number.isFinite(raw) && raw > 0) {
+    return Math.max(NOTIFICATION_MIN_INTERVAL_MS, Math.round(raw * 1000));
+  }
+  return NOTIFICATION_DEFAULT_INTERVAL_MS;
+}
+
+// Main-only authenticated GET /api/forecast: the runtime token never leaves the
+// main process. Debug/test hook OPENCODE_WIDGET_NOTIFY_FIXTURE (a path to a
+// forecast JSON) overrides the fetch entirely; it is never exposed to the
+// renderer and is only read from the environment.
+async function fetchForecastMain() {
+  const fixture = process.env.OPENCODE_WIDGET_NOTIFY_FIXTURE;
+  if (typeof fixture === 'string' && fixture.trim()) {
+    try { return JSON.parse(fs.readFileSync(fixture, 'utf8')); } catch (_) { return null; }
+  }
+  const env = await readRuntimeEnv();
+  if (!env.ok) return null;
+  try {
+    const resp = await fetch(env.base + '/api/forecast', {
+      headers: { 'Authorization': 'Bearer ' + env.token },
+    });
+    if (!resp.ok) return null;
+    return await resp.json();
+  } catch (_) {
+    return null; // server errors are skipped silently
+  }
+}
+
+// Debug-only, non-sensitive diagnostics (never logs tokens/cookies/ids).
+function notifyLog(msg) {
+  if (!DEBUG) return;
+  try { console.log('[notify] ' + msg); } catch (_) { /* ignore */ }
+}
+
+// Notification click target: restore only if minimized, then show + focus.
+// Never resizes, never changes the snap state, never opens an external URL.
+function focusWidget() {
+  if (!win || win.isDestroyed()) return false;
+  try {
+    if (win.isMinimized()) win.restore();
+    win.show();
+    win.focus();
+  } catch (_) { return false; }
+  return true;
+}
+
+function openForecast() {
+  if (!win || win.isDestroyed()) return false;
+  try { win.webContents.send('open-forecast'); } catch (_) { return false; }
+  return true;
+}
+
+function showWidgetNotification(event) {
+  const { Notification } = require('electron');
+  if (!Notification || typeof Notification.isSupported !== 'function' || !Notification.isSupported()) {
+    return 'unsupported';
+  }
+  const built = notificationPolicy.buildNotification(event, {
+    ttlHours: event.time_to_limit_hours,
+    resetAt: event.reset_at,
+    nowMs: Date.now(),
+  });
+  const notification = new Notification({ title: built.title, body: built.body });
+  notification.on('click', () => { focusWidget(); openForecast(); });
+  notification.show();
+  return true;
+}
+
+function startNotificationManager() {
+  if (notificationManager) return;
+  notificationManager = notificationManagerModule.createNotificationManager({
+    statePath: notificationStatePath(),
+    fetchForecast: fetchForecastMain,
+    showNotification: showWidgetNotification,
+    focusWidget: focusWidget,
+    openForecast: openForecast,
+    log: notifyLog,
+    intervalMs: notificationIntervalMs(),
+    now: () => Date.now(),
+  });
+  notificationManager.start().catch(() => { /* best effort */ });
+}
+
+function stopNotificationManager() {
+  if (!notificationManager) return;
+  try { notificationManager.stop(); } catch (_) { /* best effort */ }
+}
+
+// Phase 6B: minimal system tray. Created once, strictly after the
+// single-instance lock and window creation. It is a thin surface over existing
+// actions: show (focusWidget), refresh (renderer reuses its own refresh path,
+// no dashboard fan-out), toggle the policy-validated notification setting, and
+// quit (which must run the Phase 6A will-quit cleanup, never an os-level exit).
+let widgetTray = null;
+
+// Debug-only, non-sensitive diagnostics.
+function trayLog(msg) {
+  if (!DEBUG) return;
+  try { console.log('[tray] ' + msg); } catch (_) { /* ignore */ }
+}
+
+function trayNotificationsEnabled() {
+  if (!notificationManager) return false;
+  try {
+    const settings = notificationManager.getSettings();
+    return !!(settings && settings.enabled === true);
+  } catch (_) {
+    return false;
+  }
+}
+
+function trayHandlers() {
+  return {
+    show: () => { focusWidget(); },
+    refresh: () => {
+      if (!win || win.isDestroyed()) return;
+      try { win.webContents.send('tray-refresh'); } catch (_) { /* best effort */ }
+    },
+    toggle: () => {
+      if (!notificationManager) return;
+      const enabled = trayNotificationsEnabled();
+      notificationManager.setSettings({ enabled: !enabled });
+      rebuildTrayMenu();
+    },
+    quit: () => { app.quit(); },
+  };
+}
+
+function rebuildTrayMenu() {
+  if (!widgetTray || typeof widgetTray.setContextMenu !== 'function') return;
+  try {
+    const template = trayManager.buildMenuTemplate(
+      { notificationsEnabled: trayNotificationsEnabled() },
+      trayHandlers()
+    );
+    widgetTray.setContextMenu(Menu.buildFromTemplate(template));
+  } catch (_) { /* best effort */ }
+}
+
+function createWidgetTray() {
+  if (widgetTray) return widgetTray;
+  const tray = trayManager.createTray({
+    Tray: Tray,
+    Menu: Menu,
+    nativeImage: nativeImage,
+    iconPath: path.join(__dirname, 'assets', 'tray.png'),
+    notificationsEnabled: trayNotificationsEnabled(),
+    handlers: trayHandlers(),
+  });
+  if (!tray) return null;
+  widgetTray = tray;
+  trayLog('tray created');
+  return tray;
+}
+
+function destroyWidgetTray() {
+  if (!widgetTray) return;
+  try { widgetTray.destroy(); } catch (_) { /* best effort */ }
+  widgetTray = null;
+}
+
 // Quit path: only terminate a server we can positively identify as ours.
 // Read runtime.json; if it has pid+token, probe the authenticated heartbeat
 // endpoint (short timeout). Probe success -> kill pid (best effort) and unlink
@@ -325,6 +510,10 @@ function createWindow() {
 
 app.whenReady().then(() => {
   createWindow();
+  // Phase 6B: started only after the single-instance lock and window creation.
+  startNotificationManager();
+  // Tray last: it reflects the (now existing) notification settings.
+  createWidgetTray();
   startHeartbeat();
 
   app.on('activate', () => {
@@ -343,6 +532,8 @@ app.on('will-quit', (event) => {
   if (quitCleanupStarted) return;
   quitCleanupStarted = true;
   event.preventDefault();
+  stopNotificationManager();
+  destroyWidgetTray();
   stopHeartbeat();
   stopClickThroughPoll();
   if (loginWin && !loginWin.isDestroyed()) {
@@ -372,6 +563,21 @@ ipcMain.handle('resize', (e, uiState) => {
 ipcMain.handle('quit', () => {
   app.quit();
   return true;
+});
+
+// Phase 6B: notification settings. Payloads are strictly validated by
+// notification_policy (unknown fields / wrong types / non-HH:MM rejected); this
+// is never a generic settings writer and never touches the runtime token.
+ipcMain.handle('notification-settings-get', () => {
+  if (!notificationManager) {
+    return notificationPolicy.normalizeSettings(notificationPolicy.DEFAULT_SETTINGS, {});
+  }
+  return notificationManager.getSettings();
+});
+
+ipcMain.handle('notification-settings-set', (_event, payload) => {
+  if (!notificationManager) return { ok: false, error: 'unavailable' };
+  return notificationManager.setSettings(payload);
 });
 
 ipcMain.handle('open-login', async () => {

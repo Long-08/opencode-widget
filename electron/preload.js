@@ -10,6 +10,11 @@ function apiCall(method, path, payload) {
   });
 }
 
+// Phase 6B: opt-in notification settings bridge, consolidated onto widgetAPI
+// (no separate namespace). It only reads/writes the policy-validated
+// notification settings and listens for the "open forecast" / tray-refresh
+// actions. NOT a generic notification capability (no show/post/arbitrary
+// payload) and exposes no token, base URL or cookie.
 contextBridge.exposeInMainWorld('widgetAPI', {
   resize: (uiState) => ipcRenderer.invoke('resize', uiState),
   openLogin: () => ipcRenderer.invoke('open-login'),
@@ -31,7 +36,11 @@ contextBridge.exposeInMainWorld('widgetAPI', {
   apiPostSync: () => apiCall('POST', '/api/sync'),
   onSnapSmall: (cb) => ipcRenderer.on('snap-small', () => cb()),
   onSnapRestore: (cb) => ipcRenderer.on('snap-restore', (_e, s) => cb(s)),
+  onTrayRefresh: (cb) => ipcRenderer.on('tray-refresh', () => cb()),
   setClickThrough: (enabled, headerH) => ipcRenderer.invoke('set-click-through', enabled, headerH),
   exitSnap: () => ipcRenderer.invoke('exit-snap'),
   quit: () => ipcRenderer.invoke('quit'),
+  apiGetNotificationSettings: () => ipcRenderer.invoke('notification-settings-get'),
+  apiSetNotificationSettings: (payload) => ipcRenderer.invoke('notification-settings-set', payload),
+  onOpenForecast: (cb) => ipcRenderer.on('open-forecast', () => cb()),
 });
