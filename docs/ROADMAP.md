@@ -11,7 +11,7 @@
 | 2.1 | Runtime-token boundary + secret-storage semantics + Agent cost semantics | **COMPLETE** |
 | 2D | Oh My OpenCode Slim integration | **CANCELLED** — Slim is no longer installed |
 | 3 | Agent Observability Backend | **COMPLETE** |
-| 4 | Forecasting | PLANNED |
+| 4 | Explainable usage forecasting | **COMPLETE** |
 | 5A | Observability Dashboard UI | **COMPLETE** |
 | 5.1 | Frontend structure cleanup (no behavior change) | **COMPLETE** |
 | 5B | Advanced visualization (charts) | PLANNED |
@@ -49,15 +49,16 @@ Plugin-independent aggregation over normalized OpenCode usage records:
 Explicitly NOT in Phase 3: forecasting, quota prediction, notifications, dashboard UI, tray,
 autostart redesign, third-party adapters.
 
-## Phase 4 — Forecasting (PLANNED, not implemented)
+## Phase 4 — Explainable Usage Forecasting (COMPLETE)
 
-Planned only (no production code in Phase 3):
+Deterministic, reset-aware rate extrapolation over observed usage + official quota state
+(`/api/forecast`, Forecast dashboard tab). Every output is marked `type: "estimate"`;
+official quota usage and raw OpenCode message cost stay separate bases. See
+`docs/PHASE4_FORECASTING.md`.
 
-- 5 h burn rate
-- weekly burn rate
-- subscription-period burn rate
-- remaining quota estimate
-- time-to-limit
+Delivered: 5 h / weekly / subscription-period burn rates (multiple windows), reset-aware
+time-to-limit, projection to window end. Not delivered (by design): notifications/tray
+alerts (Phase 6) and advanced visualization (5B).
 
 ## Phase 5 — Dashboard UI
 
