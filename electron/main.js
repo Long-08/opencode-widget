@@ -707,9 +707,13 @@ ipcMain.handle('grab-auth', async () => {
       },
     });
     loginWin.loadURL(opencodeAuthUrl());
-    // 安全加固：登录窗口只允许在 opencode.ai 内导航，新窗口一律拒绝
+    // 安全加固：登录窗口只允许在 OpenCode 鉴权流程内导航（opencode.ai 及其 auth 子域）
+    // 以及受支持的 OAuth 提供方（GitHub / Google）。其余一律拒绝。
+    // 说明：早期版本只放行 `opencode.ai` 主域，导致 auth.opencode.ai 与 github.com 的
+    // 渲染层导航被 preventDefault，"Continue with GitHub/Google" 点击无反应。
+    const LOGIN_NAV_ALLOW = /^https:\/\/([a-z0-9-]+\.)*(opencode\.ai|github\.com|google\.com)(\/|$)/i;
     loginWin.webContents.on('will-navigate', (event, url) => {
-      if (!/^https:\/\/opencode\.ai(\/|$)/.test(url)) event.preventDefault();
+      if (!LOGIN_NAV_ALLOW.test(url)) event.preventDefault();
     });
     loginWin.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
     loginWin.on('closed', () => {
