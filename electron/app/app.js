@@ -174,6 +174,8 @@ selModel = (withHist || cands[0] || state.stats[0]).key;
   if (uiState === "large") { renderChart(); renderLarge(); }
   const ago = state.lastRefresh ? Math.round((Date.now() - state.lastRefresh) / 1000) : 0;
   const mtotal = (m && m.used) || 0;
+  const cUpd = $("#cUpdated");
+  if (cUpd) cUpd.textContent = ago > 0 ? "更新于 " + ago + "s 前" : "";
   $("#footLeft").textContent = `月消费 ${mtotal ? money(mtotal) : "—"} · ${state.rows} 条 · ${ago}s前`;
   if (state.server) {
     const cred = state.credits || 0;
@@ -248,7 +250,10 @@ function rankSortedStats() {
   });
 }
 
-function fillModelList(el, key) {
+// Compact 快看: 模型列表最多 Top 3 (完整列表在 Expanded); 排序不变, 只截断显示
+const COMPACT_MODEL_LIMIT = 3;
+
+function fillModelList(el, key, limit = 0) {
   el.innerHTML = "";
   const stats = filteredStats();
   const mode = state.mode === "overview" ? "monthly" : state.mode;
@@ -260,13 +265,14 @@ function fillModelList(el, key) {
   const rankVal = x => mUnit === "token" ? tokOf(x) : (x.group === "go" ? costOf(x) : (x[key] || 0));
   const sorted = rankSortedStats();
   const total = sorted.reduce((a, x) => a + rankVal(x), 0) || 1;
+  const shown = limit > 0 ? sorted.slice(0, limit) : sorted;
   // go 配额是共享费用池: 消耗统一取官方窗口 used(server 权威, 已含网关调用), 避免条目 cost 重复计
   const goStats = stats.filter(x => x.group === "go");
   const usedAll = (quotaWin && quotaWin.used != null && quotaWin.used > 0)
     ? quotaWin.used
     : goStats.reduce((a, x) => a + costOf(x) * (x.meter_rate || 1), 0);
   const remainAll = Math.max(0, quotaLimit - usedAll);
-  sorted.forEach(x => {
+  shown.forEach(x => {
     const div = document.createElement("div");
     const mKey = x.key || x.model;
     const isTok = mUnit === "token";
@@ -339,14 +345,14 @@ render();
 
 function renderModels() {
   const key = modelKey();
-  fillModelList($("#cList"), key);
-  fillModelList($("#dList"), key);
+  if (uiState !== "small") fillModelList($("#cList"), key, COMPACT_MODEL_LIMIT);
+  if (uiState === "large") fillModelList($("#dList"), key);
   const n = filteredStats().length;
   const freeAll = state.stats.filter(x => x.group === "free").length;
   const freeUsed = state.stats.filter(x => x.group === "free" && x.used !== false).length;
   let label = n + " 个模型";
   if (freeAll > 0) label += ` · free ${freeUsed}/${freeAll}`;
-  $("#cCount").textContent = label;
+  $("#cCount").textContent = label + " · Top " + COMPACT_MODEL_LIMIT;
   $("#dCount").textContent = label;
   document.querySelectorAll(".unit-btn").forEach(b => {
     b.classList.toggle("on", mUnit === "token");
@@ -956,6 +962,29 @@ render();
 
 
 
+// 当前模式需要的 view id 集合 (纯策略, 供 refresh 与 ensureExpandedViews 共用):
+// 基础 summary 三项常取; Expanded 级逐日序列/模型曲线只在完整面板需要时预取。
+function neededViewIds(src0) {
+  const needed = new Set([viewIdFor(src0, timeRange), viewIdFor(src0, "all"), "all_all"]);
+  if (uiState === "large") {
+    needed.add(viewIdFor("all", heatRange));
+    needed.add("all_daily");
+    if (heatRange === "30" && src0 !== "all") needed.add(viewIdFor(src0, "30"));
+    if (selModel && selModel !== "__total__") {
+      needed.add(`model_${selModel}_${heatRange}`);
+      needed.add(`model_${selModel}_daily`);
+    }
+  }
+  return [...needed];
+}
+
+// 进入 Expanded 时补齐缺失的 view 缓存 (fetchView 命中缓存不发包, 不整段清缓存重拉)。
+async function ensureExpandedViews() {
+  if (uiState !== "large") return;
+  const ids = neededViewIds(selSupplier || "all");
+  await Promise.all(ids.map(id => fetchView(id)));
+}
+
 async function refresh() {
   try {
     const data = await window.widgetAPI.apiGetState();
@@ -969,14 +998,7 @@ async function refresh() {
     state.keyOk = !!data.key; state.models = data.models || 0;
     await loadFormula(false);
     state._viewCache = {};
-    const src0 = selSupplier || "all";
-    const needed = new Set([viewIdFor(src0, timeRange), viewIdFor(src0, "all"), "all_all", viewIdFor("all", heatRange), "all_daily"]);
-    if (heatRange === "30" && src0 !== "all") needed.add(viewIdFor(src0, "30"));
-    if (selModel && selModel !== "__total__") {
-      needed.add(`model_${selModel}_${heatRange}`);
-      needed.add(`model_${selModel}_daily`);
-    }
-    await Promise.all([...needed].map(id => fetchView(id)));
+    await Promise.all(neededViewIds(selSupplier || "all").map(id => fetchView(id)));
     render();
     // Phase 5A: 既有刷新控件仅刷新当前可观测性 tab + range (force), 不扇形刷新其它 tab
     if (uiState === "large") OCW.obsEnsure(OCW.getActiveTab(), true);
@@ -1007,7 +1029,10 @@ function setUiState(v, noResize, manual) {
   // Phase 5A: 可观测性仪表盘仅在 large 显示; 首次显示只懒加载当前 tab
   const obsRoot = document.getElementById("obsDashboard");
   if (obsRoot) obsRoot.classList.toggle("on", onLarge);
-  if (onLarge) OCW.obsEnsure(OCW.getActiveTab());
+  if (onLarge) {
+    OCW.obsEnsure(OCW.getActiveTab());
+    ensureExpandedViews();
+  }
   if (!noResize) {
     window.widgetAPI.resize(v === "small" ? "small" : (onLarge ? "large" : "mid"));
   }
@@ -1117,6 +1142,8 @@ async function doGrab() {
 $("#btnMin").onclick = () => setUiState(uiState === "small" ? "mid" : "small", false, true);
 $("#btnExpand").onclick = () => setUiState(uiState === "large" ? "mid" : "large", false, true);
 $("#btnClose").onclick = () => window.widgetAPI.quit();
+// Compact 快看卡: 显式入口进入 Expanded 完整面板
+$("#btnOpenFull").onclick = () => setUiState("large", false, true);
 
 // Mini 常驻态: 点击状态条(或 Enter/Space)进入 Compact 快速查看; 手动切换会先退出吸顶。
 $("#smallView").addEventListener("click", () => {
@@ -1169,6 +1196,16 @@ selModel = keys[ni % keys.length];
 render();
 }
 document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") {
+    // Esc: Compact/Expanded -> Mini (输入控件内不劫持)
+    const t = e.target;
+    const typing = t && t.closest && t.closest("input, select, textarea");
+    if (!typing && uiState !== "small") {
+      setUiState("small", false, true);
+      e.preventDefault();
+    }
+    return;
+  }
   if (e.key === "Tab") {
     if (uiState !== "mid") cycleSupplier(1);
     e.preventDefault();

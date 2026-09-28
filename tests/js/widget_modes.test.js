@@ -141,6 +141,8 @@ function stateFixture() {
       goStat(),
       goStat({ key: 'kimi-k3|go', model: 'kimi-k3', name: 'Kimi K3', count_m: 30, cost_m: 6.2, effective_remain: 0, remain_cnt: 0 }),
       goStat({ key: 'grok-4.5|go', model: 'grok-4.5', name: 'Grok 4.5', count_m: 20, cost_m: 3.05, effective_remain: 0, remain_cnt: 0 }),
+      goStat({ key: 'glm-5.1|go', model: 'glm-5.1', name: 'GLM-5.1', count_m: 12, cost_m: 2.1, effective_remain: 0, remain_cnt: 0 }),
+      goStat({ key: 'kimi-k2.6|go', model: 'kimi-k2.6', name: 'Kimi K2.6', count_m: 8, cost_m: 1.4, effective_remain: 0, remain_cnt: 0 }),
       { key: 'big-pickle|router', model: 'big-pickle', name: 'Big Pickle', source: 'router', group: 'free', count_total: 15, count_m: 8, count_w: 4, count_s: 1, tokens_in: 100, tokens_out: 60, tokens_cache: 40, used: true },
       { key: 'mimo-v2.5-free|zen', model: 'mimo-v2.5-free', name: 'MiMo-V2.5', source: 'zen', group: 'free', count_total: 0, used: false, tokens_in: 0, tokens_out: 0, tokens_cache: 0 },
     ],
@@ -248,7 +250,8 @@ function dispatchKeydown(app, event) {
 
 function click(app, sel) {
   const target = el(app, sel);
-  const handlers = target.handlers.click || [];
+  const handlers = (target.handlers.click || []).slice();
+  if (typeof target.onclick === 'function') handlers.push(target.onclick);
   assert.ok(handlers.length, 'no click handler on ' + sel);
   handlers.forEach((fn) => fn({ target }));
 }
@@ -376,7 +379,7 @@ test('compact model list shows at most Top 3; expanded shows all', async () => {
   await app.timers.flush();
   const dashItems = el(app, '#dList').children
     .filter((c) => String(c.className).includes('m-item'));
-  assert.equal(dashItems.length, 5, 'expanded list must show every model, got ' + dashItems.length);
+  assert.equal(dashItems.length, 5, 'expanded list must show every supplier model, got ' + dashItems.length);
 });
 
 // --- 4. text rendering --------------------------------------------------------
