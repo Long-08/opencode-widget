@@ -283,7 +283,7 @@ function fillModelList(el, key, limit = 0) {
     const isQuota = x.group === "go" && !isTok;
     const srcTag = (x.source && x.source !== "known" && x.source !== "?") ? `[${esc(supTag(x.source))}] ` : "";
     let main = isTok ? fmtTokens(val) : val + "次";
-    let barPct = 0, extra = "", rem = "";
+    let barPct = 0, extra = "", remText = "";
     if (isQuota) {
       // go 次数模式: 次数 · 消费/模型配额 · 剩余次数
       // 有效剩余 / 次均费用 / 剩余次数 均由后端计算，前端直接读取
@@ -302,7 +302,7 @@ function fillModelList(el, key, limit = 0) {
       main = usedCnt + "次";
       barPct = pct;
       extra = `${fmtCost(c * mRate)}/${fmtCost(modelQuota)}`;
-      if (effectiveRemain > 0 && remainCnt > 0) rem = `<span class="rem">剩${Math.round(remainCnt)}次</span>`;
+      if (effectiveRemain > 0 && remainCnt > 0) remText = "剩" + Math.round(remainCnt) + "次";
     } else if (x.group === "go") {
       // go token 模式: 已使用 · 百分比 · 该模型总量(已用 + 剩余共享费用按本模型均价折算)
       const usedTok = windowTokens(x, mode);
@@ -327,7 +327,7 @@ function fillModelList(el, key, limit = 0) {
       extra = fmtTokens((x.tokens_in || 0) + (x.tokens_out || 0) + (x.tokens_cache || 0)) + " tok";
     }
     const barCol = isQuota ? (barPct >= 100 ? "background:#ef4444" : "") : "";
-    div.innerHTML = `<span class="nm" title="${esc(x.model)}">${srcTag}${esc(x.name)}</span><span class="bar"><i style="width:${barPct}%${barCol ? ";" + barCol : ""}"></i></span><span class="cnt">${esc(main)}<span class="sub">${esc(extra)}</span>${esc(rem)}</span>`;
+    div.innerHTML = `<span class="nm" title="${esc(x.model)}">${srcTag}${esc(x.name)}</span><span class="bar"><i style="width:${barPct}%${barCol ? ";" + barCol : ""}"></i></span><span class="cnt">${esc(main)}<span class="sub">${esc(extra)}</span></span>${remText ? '<span class="rem">' + esc(remText) + '</span>' : ""}`;
 div.onclick = () => {
 if (selModel === mKey) selModel = null;
 else {
