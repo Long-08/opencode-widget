@@ -1,277 +1,371 @@
-# OpenCode-widget
+# OpenCode Widget
 
-OpenCode / Codex / Go 用量悬浮窗 —— 透明玻璃面板，实时显示 OpenCode Go 配额、模型用量与费用。
+A transparent Windows desktop widget for OpenCode usage: Go quota, local
+observability, usage forecasting and opt-in notifications.
 
-![OpenCode-widget 截图](screenshot.png)
+**Version:** `0.9.0-rc.1` — a release candidate. This RC is **unsigned** (no
+Authenticode certificate). See the SmartScreen note below.
 
-![OpenCode-widget 大屏](screenshot-large.png)
+![OpenCode-widget screenshot](screenshot.png)
 
-## 特性
+![OpenCode-widget large dashboard](screenshot-large.png)
 
-- **透明悬浮窗**：Electron 原生透明窗口，背景透出桌面；文字与 SVG 内容保持清晰，透明度可调
-- **三档尺寸**：最小屏（吸顶 Dock）/ 中屏 / 大屏仪表盘
-- **吸顶自动变小屏**：窗口拖到屏幕顶部自动吸附并切换为最小屏（Mac Dock 风格），拖离自动恢复
-- **实时用量**：滚动（5h）/ 每周 / 每月 Go 配额百分比 + 剩余时间
-- **供应商 Tab**：全部 / Go / Kilo / Zen / Router 一键切换，联动模型明细、曲线与热力图
-- **模型明细**：按 全部/Go/Free 分组、供应商筛选、模型用量排行、历史曲线（真实时间轴）
-- **总量曲线**：切到供应商时默认显示该供应商聚合总量曲线，无需逐个点模型
-- **Free 模型**：自动汇总所有来源（router/zen/kilo/gateway 及扫描发现的未用模型）的免费用量，不随供应商筛选而消失
-- **大屏仪表盘**：GitHub 风格热力图、统计卡片（跟随时间范围）、输入/输出/缓存拆分
-- **按来源计价**：同一模型（如 hy3）在不同供应商下的免费/付费状态独立判定，与官方一致
-- **官方数据同步**：应用内登录 opencode.ai 自动抓取 Cookie 与 workspace，同步官方配额数值
-- **云端公式主动同步**：每 15 分钟自动拉取云端公式规则（计量系数/供应商/视图定义），版本变化即时生效，失败保留上一版
-- **官方计量口径**：总用量按官方系数（1.4212）折算，与 opencode.ai 账单一致；明细/曲线保持原始账单
-- **快捷键**：`Tab` 切换供应商 · `←/→` 切换供应商 · `↑/↓` 切换模型
-- **边缘 tooltip**：历史曲线悬停详情在图表右缘自动翻转到左侧，不被裁剪
+---
 
-## 架构
+## English
 
-```
-┌─────────────────────┐      HTTP/JSON       ┌──────────────────────────────┐
-│  data_server.py     │ ───────────────────► │  Electron 透明窗口            │
-│  · 读本地数据        │  127.0.0.1:8765      │  · 渲染进程直连数据服务        │
-│  · 计算用量/统计      │                      │  · 窗口交互/吸顶/透明度         │
-│  · 启动预热+缓存      │                      │  · 供应商/模型/曲线联动         │
-│  · 官方数据同步      │                      └──────────────────────────────┘
-└─────────────────────┘
-```
+### What it does
 
-- **Python 只负责取数与计算**（`data_server.py` + `go-usage-widget.py` 数据函数 + `server_data.py` 官方同步 + `views.py` 云端公式引擎）
-- **前端与窗口交互交给 Electron**（`electron/main.js` / `preload.js` / `app/index.html`）
-- **无痕启动**：直接拉起 GUI 进程（`pythonw.exe` + `electron.exe`），不经过 cmd/npm，双击不闪黑框
+- **Transparent floating panel** on the Windows desktop: Go quota (rolling 5h /
+  weekly / monthly percentage + reset countdown), model details, history curves
+  and a GitHub-style heatmap.
+- **Local observability**: per-agent, per-model, per-provider and per-session
+  usage, token and cost statistics computed from your local OpenCode data.
+- **Explainable forecasting**: deterministic, reset-aware burn rates and
+  time-to-limit estimates. Every forecast output is labelled `estimate` and is
+  never presented as official.
+- **Opt-in notifications**: forecast-driven alerts plus a minimal tray menu.
+  Off by default.
+- **Cloud formula**: metering coefficients, supplier rules and view definitions
+  are fetched periodically from a remote formula URL, with last-known-good
+  fallback.
+- **Three window sizes**: compact (snapped Dock) / mid / full dashboard, with
+  drag-to-top snapping.
 
-## 快速开始
+### Architecture
 
-### 无痕启动（推荐）
+- A Python **standard-library-only** backend (`data_server.py`) serves a
+  localhost JSON API on `127.0.0.1:8765`.
+- An **Electron shell** (`electron/`) renders the transparent window and talks to
+  the backend through a narrow preload bridge.
+- The Python backend is started by the launcher; quitting the app through the
+  normal path terminates the backend. A single instance is enforced.
 
-双击 `启动Go用量悬浮窗.vbs` —— 无任何控制台窗口，且自带防重复（已在运行时不会重复拉起）：
+### Requirements
 
-```bat
-启动Go用量悬浮窗.vbs
-```
+- **Windows 10 / 11** (x64).
+- **Python 3.11+**, standard library only — no `pip install` is required at
+  runtime.
+- **Node.js / Electron only for development**. The packaged RC embeds Electron;
+  end users do not install Node.
 
-> 说明：`.vbs` 经 `wscript.exe` 运行，默认不显示控制台窗口，是唯一真正"零黑框"的双击入口。
-> `.cmd` 双击时 Windows 会拉起 cmd.exe 承载脚本，必然闪一下黑框，仅作兼容入口保留。
+### Install (portable)
 
-### 手动启动
+1. Unzip the release folder anywhere (for example under your user profile).
+2. Run the launcher: `启动Go用量悬浮窗.vbs` (recommended — no console flash) or
+   the compatibility entry `启动Go用量悬浮窗.cmd`.
+3. The launcher starts the Python backend and then the Electron shell. There is
+   no installer and no admin requirement.
 
-```bat
-start "" "%LOCALAPPDATA%\Programs\Python\Python311\pythonw.exe" data_server.py
-start "" electron\node_modules\electron\dist\electron.exe electron
-```
+### Run / first launch
 
-### 开机自启（可选）
+- On first launch the widget reads your local OpenCode database if present. If
+  the database is missing or uses an unsupported schema, the widget shows a
+  reader/empty state instead of failing.
+- The backend listens on `127.0.0.1:8765` only (localhost, never a public
+  interface).
+- To sync official quota values, use the right-click menu to log in /
+  grab the auth cookie.
+- Optional auto-start: place the launcher in the Startup folder
+  (`Win+R` → `shell:startup`).
+- Quitting normally (tray → Quit, or closing the window) terminates the backend
+  process.
 
-把 `启动Go用量悬浮窗.vbs` 放入启动文件夹即可（Win+R 输入 `shell:startup`），或建一个指向它的桌面快捷方式。
+### Notifications
 
-### 依赖
+- **Off by default.** No notification state is written and nothing is created
+  until you explicitly opt in (tray toggle or the Forecast-tab checkbox).
+- Notifications consume the forecast endpoint only; they never recompute usage
+  or burn rate.
+- Dedupe, cooldown, escalation and quiet hours are applied; notifications are not
+  an audit log.
 
-- Python 3.11（内置 http.server，无第三方后端依赖）
-- Node.js + Electron（`electron/` 内执行 `npm install` 安装依赖）
+### Security model
 
-## 使用说明
+- The OpenCode database (`~/.local/share/opencode/opencode.db`) is opened
+  **read-only** and is never modified.
+- Secrets (API key, auth cookie) live in a **DPAPI-encrypted `secrets.enc`**,
+  bound to the current Windows user. New secret writes **fail closed**; a failed
+  protection never downgrades to plaintext.
+- The localhost API requires a **per-run random runtime token**
+  (`Authorization: Bearer`) plus **Host and Origin policy**. **CORS is never
+  `*`** — origins are allowlisted or omitted.
+- The **renderer never receives the runtime token or the base URL**, and exposes
+  no generic fetch / settings / notification capability.
+- **Notifications are OFF by default** and are never created without the user
+  opting in.
+- Production defaults: **DevTools off**, **debug logging off**.
 
-### 窗口形态
+#### Remote formula trust model
 
-| 形态 | 触发 | 用途 |
-|------|------|------|
-| 最小屏 | 拖到屏幕顶部吸附 / 点最小化 | 吸顶 Dock，只看滚动配额 |
-| 中屏 | 默认 | 配额 + 模型明细列表 |
-| 大屏 | 点右上角展开 | 供应商 Tab + 热力图 + 统计卡 + 曲线 + 明细 |
+- The cloud formula is **pure data — no code is executed**. The client enforces
+  **HTTPS**, a **strict schema + version compatibility check**, a **size cap**, a
+  **fetch timeout**, **last-known-good fallback** and **atomic adoption**.
+- **No cryptographic signature is verified.** The formula is reported as
+  `integrity_status: unsigned`. HTTPS protects transport, **not** content
+  authorship — do not read HTTPS as content signing.
 
-### 供应商切换
+#### Scope note
 
-顶部 Tab 或快捷键 `←/→`（大屏）/ `Tab`（任意屏）。切供应商后：
-- 自动回到"全部"分类并显示该供应商的**聚合总量曲线**（`__total__`，不出现在模型明细列表）
-- 模型明细、统计卡、热力图同步跟随该供应商
+This project does not defend against malicious processes already running as the
+same Windows user; such a process can read the runtime token and decrypt the
+per-user secret store. The controls above harden the normal path, they are not a
+same-user sandbox.
 
-### 模型明细
+### Data paths
 
-- 上方面板按 **全部 / Go / Free** 分组过滤（Free 聚合所有来源的免费模型）
-- 点击某模型 → 选中，右侧曲线/热力图切到该模型（Go/全部 模式会自动把顶部供应商同步过去；Free 模式不切供应商）
-- 再次点击已选模型 → 取消选中，回到供应商总量曲线
-- 快捷键 `↑/↓` 在模型间循环；在第一个模型上再按 `↑` 回到总量曲线
+Mutable data lives in `%APPDATA%\opencode-widget\`:
 
-### 曲线悬停
+| File | Contents |
+|------|----------|
+| `config.json` | non-secret configuration |
+| `secrets.enc` | DPAPI-encrypted secrets (Windows user-bound) |
+| `usage_remote.db` | official sync ledger mirror |
+| `server_usage.db` | legacy official-data ledger mirror |
+| `formula_cache.json` | last-known-good cloud formula |
 
-鼠标滑过历史曲线显示当天 Token / 次数 / 费用详情；在图表右缘会自动翻转到鼠标左侧，避免被容器裁剪。
+- Legacy in-repo copies of these files migrate into `%APPDATA%\opencode-widget\`
+  automatically **once**; the originals are kept.
+- The data directory can be overridden with `OPENCODE_WIDGET_DATA_DIR` (portable
+  or embedded deployments).
+- **Runtime token file:** `%TEMP%\opencode-widget\runtime.json` (per-run token,
+  port, pid, instance id).
+- **Notification state:** Electron `userData` (`notification_state.json`).
+- **Debug log:** `%TEMP%\widget_snap.log` — **debug builds only**.
 
-### 小屏时间范围（快捷键 X）
+### Privacy
 
-小屏顶部的"总用量"默认显示**今天**的数据。按 `X` 键循环切换：**今天 → 近7天 → 全部 → 今天**。主金额与底部统计格（总Token/总费用/总次数/活跃天数）随范围联动，选择会记住（localStorage）。
+- Only **local usage metadata** is collected, plus **official quota sync** when
+  you opt in.
+- **Prompt / response content is never exposed** by the observability APIs.
 
-> 说明：小屏统计基于历史逐日数据聚合，跟随当前供应商（或全部）；"全部"即全部历史。
+### Upgrade
 
-### Go 配额重置倒计时
+- Replace the binaries (unzip over the folder). Keep
+  `%APPDATA%\opencode-widget` — your config, secrets and history are preserved.
+- Migrations are **versioned and fail-safe**: a failed migration never destroys
+  existing data.
+- There is **no auto-updater**; upgrades are manual.
 
-选中 Go 供应商时，小屏会在模型指标与总Token之间显示一行橙色小字：`⏳ 重置: 5 hours 0 minutes后`——对应 Go 平台官方滚动配额窗口（Session/周/月按当前时间范围取对应窗口：今天→Session、近7天→周、全部→月）的剩余重置时间。
+### Uninstall
 
-### 登录同步官方配额
+1. Delete the application folder.
+2. Your user data in `%APPDATA%\opencode-widget\` is **kept** unless you remove
+   it. To remove it manually, delete `%APPDATA%\opencode-widget\` (this removes
+   `config.json`, `secrets.enc`, `usage_remote.db`, `server_usage.db` and
+   `formula_cache.json`).
+3. Optionally delete `%TEMP%\opencode-widget\runtime.json` and, in debug builds,
+   `%TEMP%\widget_snap.log`.
 
-右键菜单 → **用浏览器登录**（打开 opencode.ai）或 **自动抓取 Cookie 同步数值**（应用内登录窗口，自动捕获 auth cookie + workspace_id）。登录态持久化，下次免登录。
+### Troubleshooting
 
-### 右键菜单
+- **Missing OpenCode database:** the widget shows an empty/reader state; make
+  sure OpenCode has been used at least once and the database exists.
+- **Unsupported database schema:** the reader reports the schema as unsupported
+  rather than guessing; update OpenCode or the widget.
+- **Port occupied (`8765`):** startup fails clearly and **never kills the other
+  process**. If the occupant is this widget's own backend, the existing instance
+  is reused; otherwise choose a different port via the port environment
+  override.
+- **Official sync unavailable:** quota values fall back to the last local state;
+  retry from the menu.
+- **Notifications unsupported / not firing:** notifications are off by default —
+  opt in first, and check quiet hours.
+- **Tray icon missing:** Windows may hide new tray icons in the overflow area;
+  check there before assuming failure.
+- **Formula fallback:** if the remote formula is unreachable, the last-known-good
+  copy stays active (`integrity_status: unsigned`).
+- **Local server unavailable:** the window shows a disconnected state; relaunch
+  the launcher to restart the backend.
 
-立即刷新 / 用浏览器登录 / 自动抓取 Cookie 同步数值 / 服务器配置（手动）/ 手动校准 / API Key 设置
+### Development
 
-## 数据来源
+- Run the test suite:
 
-- 本地 `~/.local/share/opencode/opencode.db`（OpenCode 会话用量）+ `~/.codex/logs_2.sqlite`
-- 官方 opencode.ai Go 配额（配置 auth cookie 后经 `POST /api/sync` 同步）
-- 本地 `server_usage.db` 是官方数据的账本镜像（自动同步，与仓库数据独立）
-- 云端公式（计量系数 / 供应商 / 视图定义）从 Cloudflare Worker URL 拉取，每 15 分钟自动同步；本地 `views.py` 提供默认公式兜底
+  ```bat
+  python -m pytest -o addopts="" -q
+  ```
 
-## 计量口径说明
+  Expected: all tests pass (461 passed when this RC was cut).
+- Node/Electron is only needed to work on `electron/`; run `npm install` inside
+  `electron/` first.
+- If pytest cannot access its temp base directory, point `TEMP`/`TMP` at a
+  writable folder before running, for example:
 
-- **总用量 / 小屏主金额** 显示官方口径：账单成本 × 官方计量系数（当前 1.4212，由云端公式 `params.meter.ratio` 定义，云端可变），与 opencode.ai 账单（封顶配额）一致
-- **模型明细 / 每日曲线 / tooltip** 保持原始账单成本，避免明细虚高
- - 切换时间范围（今天/近7天/全部）与供应商时，主金额随之联动，均为官方口径
+  ```bat
+  set TEMP=%LOCALAPPDATA%\Temp\opencode
+  set TMP=%TEMP%
+  python -m pytest -o addopts="" -q
+  ```
 
-## 公式与数据源
+### SmartScreen note
+
+`0.9.0-rc.1` is an **unsigned** release candidate — it carries no Authenticode
+signature, so **Windows SmartScreen may warn** when you run it for the first
+time. This is expected for an unsigned RC. **Never use a script or workaround to
+bypass OS security warnings**; if you do not trust the build, do not run it.
+
+---
+
+## 中文
+
+### 功能简介
+
+一个透明的 Windows 桌面悬浮窗，展示 OpenCode 用量：Go 配额、本地可观测性、
+用量预测与可选通知。
+
+**版本：** `0.9.0-rc.1`（发布候选版，**未签名**，无 Authenticode 证书）。
+
+- **透明悬浮窗**：Go 配额（滚动 5h / 每周 / 每月百分比 + 重置倒计时）、模型
+  明细、历史曲线与 GitHub 风格热力图。
+- **本地可观测性**：按 Agent / 模型 / 供应商 / 会话统计用量、Token 与费用。
+- **可解释预测**：确定性的、感知重置的速率与“距耗尽时间”估算，所有预测结果均
+  标记为 `estimate`，绝不当作官方值。
+- **可选通知**：基于预测的提醒 + 最小托盘菜单，**默认关闭**。
+- **云端公式**：计量系数、供应商规则与视图定义定期从远程公式 URL 拉取，失败时
+  保留上一版（last-known-good）。
+- **三档窗口**：最小屏（吸顶 Dock）/ 中屏 / 大屏仪表盘，支持拖到顶部吸附。
 
 ### 架构
 
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│  Cloudflare Worker (opencode-formula.opencode-widget.workers.dev)      │
-│  · cloud/formula.json → build_worker.py → formula-worker.js           │
-│  · 提供云端公式：params(动态变量) + views(视图定义)                     │
-└───────────────────────────────────────┬─────────────────────────────────┘
-                                        │ HTTP/JSON (每 15 分钟同步)
-                                        ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│  data_server.py (本地)                                                  │
-│  · FormulaStore 拉取/缓存/回退 (TTL 900s, version 热更新)              │
-│  · apply_params_to_gw(): 云端 params → gw 模块级规则表                  │
-│  · 失败静默保留上一版，本地 views.py DEFAULT_FORMULA 兜底              │
-└───────────────────────────────────────┬─────────────────────────────────┘
-                                        │ 127.0.0.1:8765 /api/*
-                                        ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│  go-usage-widget.py (计算引擎)                                          │
-│  · model_stats / supplier_stats / history 等数据函数                    │
-│  · 按云端公式计算 est_req_cost / model_quota / model_remain 等字段     │
-└─────────────────────────────────────────────────────────────────────────┘
-```
+- Python **仅用标准库**的后端（`data_server.py`）在本机 `127.0.0.1:8765`
+  提供 JSON API。
+- **Electron 外壳**（`electron/`）负责透明窗口，并经最小化的 preload 桥访问
+  后端。
+- 后端由启动器拉起；正常退出会终止后端进程；强制单实例。
 
-### 公式来源与优先级
+### 环境要求
 
-| 优先级 | 来源 | 说明 |
-|--------|------|------|
-| 1 | 云端 Worker (`/formula`) | `config.json` 的 `formula_url` 指向的 URL |
-| 2 | 本地缓存 | `FormulaStore` 内存缓存，TTL 900s，version 变化时自动热更新 |
-| 3 | 本地默认 | `views.py` `DEFAULT_FORMULA`，离线/云端故障时回退 |
+- **Windows 10 / 11**（x64）。
+- **Python 3.11+**，仅标准库，运行时无需 `pip install`。
+- **Node.js / Electron 仅用于开发**；打包后的 RC 已内置 Electron，最终用户无需
+  安装 Node。
 
-`apply_params_to_gw()` 将云端 `params` 覆盖到 `gw` 模块级规则表（`MODEL_QUOTAS`/`PRICES`/`REQ_LIMITS`/`TOKENS_PER_REQ`/`LIMITS` 等），**缺 key 保持本地默认**，保证降级一致。
+### 安装（绿色版）
 
-### params 参数字典
+1. 将发布目录解压到任意位置。
+2. 运行启动器：`启动Go用量悬浮窗.vbs`（推荐，无黑框）或兼容入口
+   `启动Go用量悬浮窗.cmd`。
+3. 启动器先启动 Python 后端，再启动 Electron 外壳。无需安装、无需管理员权限。
 
-| 参数 | 类型 | 含义 | 来源 | 改动影响 |
-|------|------|------|------|---------|
-| `meter.ratio` | float | 计量系数（账单×ratio = 官方口径） | 云端 | 总用量/小屏主金额 |
-| `limits.monthly` | float | 月度基础限额（USD） | 云端 | 全局封顶 |
-| `limits.weekly` | float | 周限额（USD） | 云端 | 周窗口配额 |
-| `limits.session` | float | 会话限额（USD） | 云端 | 滚动窗口配额 |
-| `limits.credit_per_applied` | float | 每笔 credits 扩容额度（USD） | 云端 | 全局限额 = monthly + applied_credits × credit_per_applied |
-| `windows.session_ms` | int | 会话窗口时长（毫秒） | 云端 | 重置倒计时 |
-| `windows.week_ms` | int | 周窗口时长（毫秒） | 云端 | 重置倒计时 |
-| `sources.paid` | list | 付费供应商列表 | 云端 | meterRatio 作用范围 |
-| `sources.subset_of` | dict | 子集供应商归属（如 gateway→go） | 云端 | 模型列表去重/聚合 |
-| `free_models.*` | dict | 免费模型判定规则 | 云端 | free 分组 |
-| `providers.src` | dict | provider → source 映射 | 云端 | 数据来源分类 |
-| `providers.prefixes` | list | provider 前缀列表 | 云端 | 模型来源识别 |
-| `prices` | dict | 每模型 in/out/cr/cw 价格（USD/M token） | 云端 | est_req_cost / est_tok_cost |
-| `model_quotas` | dict | 每模型月度使用额度（USD） | 云端 | 模型独立剩余 |
-| `req_limits` | dict | 每模型月度请求数上限 [low, mid, high] | 云端 | est_req_cost = quota / high |
-| `tokens_per_req` | dict | 每模型每次请求平均 token 数 | 云端 | est_tok_cost = est_req_cost / tokens_per_req |
-| `display_names` | dict | 模型显示名 | 云端 | 前端模型名称 |
-| `refresh.formula_s` | int | 公式同步间隔（秒） | 云端 | 后台同步频率 |
+### 运行 / 首次启动
 
-### 计算字段追溯表
+- 首次启动会读取本地 OpenCode 数据库；若数据库缺失或 schema 不受支持，会显示
+  空状态/读取状态，而不是直接失败。
+- 后端仅监听 `127.0.0.1:8765`（本机，不对外）。
+- 如需同步官方配额，使用右键菜单登录 / 抓取 Cookie。
+- 可选开机自启：把启动器放入启动文件夹（`Win+R` → `shell:startup`）。
+- 正常退出（托盘 → 退出，或关闭窗口）会终止后端进程。
 
-> 行 = 前端/API 中每个显示数据字段；列 = 来源 / 计算方式 / 代码位置。
-> 公式注册表为单一真相源，见 `formula_registry.py`；云端 formula.json v4 `formulas` 节为下发副本。
+### 通知
 
-| 显示字段 | 来源 | 计算方式 | 代码位置 |
-|----------|------|---------|---------|
-| **小屏主金额（总用量）** | 官方 `cost_summary`（原始账单 Σcost） | `Σcost × meter.ratio`（scope 为 all 或 source in paid） | `views.py` `ViewEngine._apply_post` |
-| **供应商 cost（大窗统计卡）** | 本地聚合（按 src/model/日期） | `Σcost`（原始账单，不乘 ratio） | `data_server.py` `/api/views` |
-| **suppliers.go.cost** | `remote_rows`(官方 `cost_map`) + `extra`(本地补充) | 官方优先，本地仅补充官方没有的 | `data_server.py` `_collect_rows` |
-| **模型明细 cost_m / cost_w / cost_s** | 本地聚合 `s["cost_m"]` 等 | `Σcost`（原始账单） | `go-usage-widget.py` `model_stats` |
-| **est_req_cost（官方估算次均费用）** | 云端 `params.model_quotas` + `req_limits` | `model_quota / req_limits[2]` | `formula_registry.py` → `go-usage-widget.py` |
-| **est_tok_cost（官方估算每 token 费用）** | `est_req_cost` + `tokens_per_req` | `est_req_cost / tokens_per_req[m]` | `formula_registry.py` → `go-usage-widget.py` |
-| **model_quota（模型月度额度）** | 云端 `params.model_quotas` | 直接读取，缺省 fallback `LIMITS["monthly"]` | `formula_registry.py` → `go-usage-widget.py` |
-| **model_used（模型已用费用）** | 官方 `cost_map[m]`（go 来源优先）或本地 `cost_total` | `cost_map[m]`（原始账单，未乘 ratio） | `formula_registry.py` → `go-usage-widget.py` |
-| **model_remain（模型剩余额度）** | 计算 | `max(0, model_quota - model_used)` | `formula_registry.py` → `go-usage-widget.py` |
-| **effectiveRemain（有效剩余）** | 计算 | `min(model_remain, global_remain)` | `formula_registry.py` → `data_server.py` → `index.html` |
-| **remainCnt（剩余次数）** | `effectiveRemain` + `avgPerReq` | `effective_remain / avg_per_req` | `formula_registry.py` → `data_server.py` → `index.html` |
-| **avgPerReq（次均费用）** | 实际数据或官方估算 | 有数据时 `c / usedCnt`，否则 `est_req_cost` | `formula_registry.py` → `data_server.py` → `index.html` |
-| **token 配额 tq_m / tq_w / tq_s** | `model_quota` + 实际均价 | `cq_monthly / avg_monthly_cost` | `formula_registry.py` → `go-usage-widget.py` |
-| **token 使用百分比 tp_m / tp_w / tp_s** | `monthly_tok` + `tq_m` | `min(100, monthly_tok / tq_m × 100)` | `formula_registry.py` → `go-usage-widget.py` |
-| **配额百分比（小屏顶部）** | 官方 `quota_snapshot` | `pct = used / limit` | `data_server.py` `/api/state` |
-| **全局限额 quotaLimit** | 官方 `limits.monthly` + `applied_credits` | `monthly + applied_credits × credit_per_applied` | `formula_registry.py` → `go-usage-widget.py` |
-| **全局已用 usedAll** | 官方 `cost_summary`（付费来源 Σcost） | `Σcost`（原始账单） | `formula_registry.py` → `go-usage-widget.py` |
-| **cache_hit（缓存命中率）** | 本地 `usage_records` | `cache_read / (cache_read + tokens_in) × 100` | `formula_registry.py` → `go-usage-widget.py` |
-| **rate（速率）** | 本地 `usage_records` | `tok_sec_sum / tok_sec_n` | `formula_registry.py` → `go-usage-widget.py` |
-| **token 配额反推(前端)** | `model_quota` + 实际均价 | `used_tokens + remain_cost / avg_cost_per_token` | `formula_registry.py` → `data_server.py` → `index.html` |
+- **默认关闭**：在你明确开启（托盘开关或 Forecast 标签页复选框）之前，不会写入
+  任何通知状态，也不会创建通知。
+- 通知只消费预测接口，不重算用量或速率。
+- 应用去重、冷却、升级与免打扰；通知不是审计日志。
 
-### 官方口径 vs 原始账单（v6 分账口径）
+### 安全模型
 
-- **原始账单 cost**：官方 API 返回的 `cost_summary` / `cost_map` 值，是各模型实际消费金额。
-- **官方口径 used**：官方内部计价，`used = Σ(消费 × 折算率)`，折算率全局 1.4212（云端 `params.meter.rate_default` 可覆盖）：
-- **进度类口径**（中屏进度条 / 小屏·本期 / 大屏·本期）：
+- OpenCode 数据库（`~/.local/share/opencode/opencode.db`）以**只读**方式打开，
+  **永不修改**。
+- 机密（API Key、auth cookie）保存在 **DPAPI 加密的 `secrets.enc`** 中，绑定当前
+  Windows 用户；新的机密写入**失败即关闭（fail closed）**，不会降级为明文。
+- 本机 API 需要**每次运行随机生成的运行时 token**（`Authorization: Bearer`），
+  并配合 **Host 与 Origin 策略**；**CORS 从不为 `*`**。
+- **渲染进程永远拿不到运行时 token 和 base URL**，也没有通用 fetch / 设置 /
+  通知能力。
+- **通知默认关闭**，未获用户明确开启绝不创建。
+- 生产默认：**DevTools 关闭**、**调试日志关闭**。
+
+#### 远程公式信任模型
+
+- 云端公式是**纯数据，不执行任何代码**。客户端强制 **HTTPS**、**严格的 schema
+  与版本兼容校验**、**大小上限**、**拉取超时**、**last-known-good 回退**与
+  **原子替换**。
+- **不校验任何密码学签名**，`integrity_status` 为 `unsigned`。HTTPS 只保护传输，
+  **不等于对内容来源的签名**。
+
+#### 范围说明
+
+本项目不防御“已经以同一 Windows 用户身份运行的恶意进程”；这类进程可以读取运行时
+token 并以该用户身份解密机密库。上述措施加固的是正常路径，而非同用户沙箱。
+
+### 数据路径
+
+可变数据位于 `%APPDATA%\opencode-widget\`：
+
+| 文件 | 内容 |
+|------|------|
+| `config.json` | 非机密配置 |
+| `secrets.enc` | DPAPI 加密机密（绑定 Windows 用户） |
+| `usage_remote.db` | 官方同步账本镜像 |
+| `server_usage.db` | 旧版官方数据账本镜像 |
+| `formula_cache.json` | 云端公式 last-known-good |
+
+- 仓库内旧位置的这些文件会**自动迁移一次**到 `%APPDATA%\opencode-widget\`，
+  原文件保留。
+- 数据目录可用 `OPENCODE_WIDGET_DATA_DIR` 覆盖（便携 / 嵌入式场景）。
+- **运行时 token 文件：** `%TEMP%\opencode-widget\runtime.json`（本次运行的
+  token / 端口 / pid / 实例 id）。
+- **通知状态：** Electron `userData`（`notification_state.json`）。
+- **调试日志：** `%TEMP%\widget_snap.log`（仅调试构建）。
+
+### 隐私
+
+- 只采集**本地用量元数据**；在你开启后，另加**官方配额同步**。
+- 可观测性 API **绝不暴露提示词 / 响应内容**。
+
+### 升级
+
+- 用新版本覆盖解压即可，保留 `%APPDATA%\opencode-widget`，配置、机密与历史都会
+  保留。
+- 迁移是**分版本、失败安全**的：迁移失败不会破坏已有数据。
+- **没有自动更新器**，升级需手动。
+
+### 卸载
+
+1. 删除应用目录。
+2. `%APPDATA%\opencode-widget\` 中的用户数据默认**保留**；如需彻底清除，请手动
+   删除该目录（会一并删除 `config.json`、`secrets.enc`、`usage_remote.db`、
+   `server_usage.db`、`formula_cache.json`）。
+3. 可选：删除 `%TEMP%\opencode-widget\runtime.json`，以及调试构建下的
+   `%TEMP%\widget_snap.log`。
+
+### 疑难排查
+
+- **找不到 OpenCode 数据库：** 显示空状态；请确认 OpenCode 至少使用过一次且
+  数据库存在。
+- **数据库 schema 不受支持：** 读取器会明确报告不支持，而不是猜测。
+- **端口被占用（`8765`）：** 启动会明确失败，**绝不结束其它进程**；若占用者就是本
+  悬浮窗后端，则复用现有实例，否则可通过端口环境变量改用其它端口。
+- **官方同步不可用：** 回退到最近一次本地状态，可稍后重试。
+- **通知未触发：** 通知默认关闭，请先开启，并检查免打扰设置。
+- **托盘图标不见了：** Windows 可能把新图标收进溢出区，先检查那里。
+- **公式回退：** 远程公式不可达时，保留 last-known-good（`integrity_status:
+  unsigned`）。
+- **本机服务不可用：** 窗口显示断开状态，重新运行启动器以重启后端。
+
+### 开发
+
+- 运行测试：
+
+  ```bat
+  python -m pytest -o addopts="" -q
   ```
-  进度% = ( 登录账号官方消费 × 1.4212 − 本期抵扣×$5 ) / 基础额度   ← 月60 / 周30 / 5h=12
+
+  预期：全部通过（本 RC 截定时为 461 passed）。
+- 只有在开发 `electron/` 时才需要 Node/Electron；先在 `electron/` 内执行
+  `npm install`。
+- 若 pytest 无法访问其临时目录，先把 `TEMP`/`TMP` 指向可写目录，例如：
+
+  ```bat
+  set TEMP=%LOCALAPPDATA%\Temp\opencode
+  set TMP=%TEMP%
+  python -m pytest -o addopts="" -q
   ```
-- **全部（全览）** = 所有账号累计：
-  ```
-  全部 = 登录账号官方 × 1.4212 + 其他账号本地估算 × 1.4212
-  ```
-- **分账规则**：本地记录与官方逐条比对（同模型 ±120 秒窗口匹配，一条官方最多配一条本地）：
-  - 命中官方 → 登录账号（以官方为准，防重叠）
-  - 未命中 → 其他账号（仅本地估算可得）
-  - 未登录场景（官方为空）→ 全部按本地估算
-- **订阅周期锚定**：自动从 `/workspace/{id}/billing` 页付款记录解析最近订阅日（缓存 6h；距订阅日 ≥30 天后每日抓取直到续订）；`config.subscription.start` 为手工兜底。
-- **抵扣规则**：每条 referral credit 抵扣 $5 已用量（从 used 中减），**不扩容分母**；抵扣次数按 `config.credit_deductions` 日期过滤（仅本期生效）。
 
-- **抵扣规则**：每条 referral credit 抵扣 $5 已用量（从 used 中减），**不扩容分母**——官方 pct 分母恒为基础额度 12/30/60。
-- **窗口定义**：月=滚动30天；周=周期首请求锚定（非滚动7天）；5h=5小时周期制。本地以滚动窗口近似，有官网抓取时被官方 pct 覆盖。
-- **模型明细/曲线/tooltip**：显示折算后金额（消费×折算率），与总进度可直接对账。
+### SmartScreen 提示
 
-### 更新云端公式
-
-1. 修改 `cloud/formula.json`（params + constants + formulas 三节）
-2. 运行 `python cloud/build_worker.py` 生成 `cloud/formula-worker.js`
-3. 部署到 Cloudflare Worker（参考 `wrangler deploy` 或上传脚本）
-4. 本地 `data_server.py` 每 900s 自动拉取，版本变化时热更新；云端故障时静默保留上一版
-
-> 本地 `views.py` `DEFAULT_FORMULA` 为离线兜底，应与云端版本保持同步（当前均为 v4）。
-> 公式注册表 `formula_registry.py` 为本地执行层，云端只下发元数据（display/source/expr/params），不执行任意代码。
-
-### 本地同步机制
-
-- `data_server.py` 启动时调用 `get_formula()` 拉取云端公式
-- 后台线程 `formula_sync_loop()` 每 900 秒强制拉取，检测 `version` 变化
-- 版本变化时自动 `apply_params_to_gw()` 覆盖本地规则表 + 重建 `ViewEngine`
-- 云端/网络故障时静默保留上一版已生效公式，不中断服务
-
-## 目录结构
-
-```
-data_server.py            # 数据服务（HTTP/预热/缓存/API）
-go-usage-widget.py        # 数据计算函数（用量/统计/历史/热力图/来源计价）
-server_data.py            # 官方用量抓取与落库
-views.py                  # 云端公式引擎（拉取/缓存/回退 + 视图聚合与计量系数）
-browser_cookie.py         # 浏览器 Cookie 获取辅助
-启动Go用量悬浮窗.cmd      # 兼容启动入口（会闪一次黑框）
-启动Go用量悬浮窗.vbs      # 无痕启动入口（推荐）
-electron/
-  main.js                 # 透明窗口/吸顶/尺寸/登录抓取
-  preload.js              # 最小 IPC 桥
-  app/index.html          # 前端界面
-DEBUG.md                  # 已知问题与恢复手册
-```
-
-## 开发排障
-
-遇到疑难问题先查 `DEBUG.md`（记录了历史 bug 的根因与恢复步骤）。
+`0.9.0-rc.1` 是**未签名**的发布候选版，没有 Authenticode 签名，首次运行时
+**Windows SmartScreen 可能弹出警告**——这对未签名 RC 是正常现象。
+**不要使用任何脚本或手段绕过操作系统的安全警告**；若你不信任该构建，请不要运行。
