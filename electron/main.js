@@ -52,8 +52,11 @@ function opencodeAuthUrl() {
 async function readAuthCookieFromSession(ses) {
   try {
     const cookies = await ses.cookies.get({ url: 'https://opencode.ai' });
-    const auth = cookies.find(c => c.name === 'auth');
-    return auth ? auth.value : '';
+    // 新版控制台的官方配额接口认 __Host-console_session；auth 是旧版登录态。
+    // 优先新会话，否则回退旧 auth。
+    const pick = (name) => cookies.find(c => c.name === name);
+    const c = pick('__Host-console_session') || pick('auth');
+    return c ? c.value : '';
   } catch (_) { return ''; }
 }
 
@@ -725,7 +728,8 @@ ipcMain.handle('grab-auth', async () => {
     const tryCapture = async () => {
       if (settled || capturing || !loginWin || loginWin.isDestroyed()) return;
       const url = loginWin.webContents.getURL();
-      const m = /\/workspace\/(wrk_[A-Za-z0-9]+)/.exec(url);
+      // 新版控制台落在 /console/{ws}；旧版是 /workspace/{ws}。两者都抓。
+      const m = /\/(?:console|workspace)\/(wrk_[A-Za-z0-9]+)/.exec(url);
       if (!m) return;
       capturing = true;
       let cookie = '';

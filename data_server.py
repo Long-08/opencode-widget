@@ -878,6 +878,21 @@ def _collect_rows():
     return go_rows + cx_rows, {}, reader_meta
 
 
+def _scrape_official_windows(cookie, ws):
+    """官方配额窗口: 优先新版控制台 go/status, 回退旧 SSR /workspace/{ws}/go。
+
+    新版 (SPA) 账号通常只有 __Host-console_session、没有 auth cookie，
+    旧 SSR 路径会 302 到登录页，因此优先新接口。
+    """
+    try:
+        r = gw.fetch_go_status(cookie, ws)
+        if r.get("ok"):
+            return r
+    except Exception:
+        pass
+    return gw.scrape_server_usage(cookie, ws)
+
+
 def do_sync():
     try:
         cfg = gw.load_config()
@@ -889,23 +904,36 @@ def do_sync():
     if not cookie or not ws:
         return {"ok": False, "error": "缺少 auth cookie 或 workspace ID"}
     try:
-        res = gw.scrape_server_usage(cookie, ws)
+        res = _scrape_official_windows(cookie, ws)
     except Exception as e:
         return {"ok": False, "error": f"抓取失败: {e}"}
     if not res.get("ok"):
         return {"ok": False, "error": res.get("error", "抓取失败")}
+    # 官方配额落库与 usage/cost 同步解耦: 新版账号可能没有 auth cookie,
+    # full_sync 的 RPC 会失败, 但配额快照必须写入 (供 _apply_server_quota 使用)。
+    quota_n = 0
+    if ur is not None and res.get("windows"):
+        try:
+            conn = ur.init_remote_db()
+            try:
+                quota_n = ur.sync_quota_snapshot(conn, res["windows"], ws)
+            finally:
+                conn.close()
+        except Exception:
+            quota_n = 0
     if ur is not None:
         try:
             r = ur.full_sync(cookie, ws, windows=res.get("windows"),
                              applied_credits=res.get("applied_credits"))
         except Exception as e:
-            return {"ok": False, "error": f"落库失败: {e}"}
+            r = {"ok": False, "error": str(e)}
     else:
         r = {"ok": True}
     with CACHE["lock"]:
         CACHE["state"] = None
         CACHE["ts"] = 0
-    return {"ok": True, "windows": res.get("windows"), "remote": r}
+    return {"ok": True, "windows": res.get("windows"),
+            "quota_snapshot": quota_n, "remote": r}
 
 
 def _config_json():

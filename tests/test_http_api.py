@@ -175,6 +175,8 @@ def test_sync_success(api_server, api_token, data_server, fixtures_dir, monkeypa
         server={"auth_cookie": "dummy-cookie", "workspace_id": "wrk_dummy"},
     )
     windows = [{"kind": "monthly", "pct": 10.0}]
+    # new console API unavailable here -> must fall back to the legacy scrape
+    monkeypatch.setattr(data_server.gw, "fetch_go_status", lambda *a, **k: {"ok": False})
     monkeypatch.setattr(
         data_server.gw, "scrape_server_usage",
         lambda *a, **k: {"ok": True, "windows": windows, "applied_credits": 3},
@@ -190,11 +192,44 @@ def test_sync_success(api_server, api_token, data_server, fixtures_dir, monkeypa
     assert data["remote"]["ok"] is True
 
 
+def test_sync_prefers_new_go_status(api_server, api_token, data_server, fixtures_dir, monkeypatch):
+    _save_config(
+        data_server, fixtures_dir,
+        server={"auth_cookie": "console-session", "workspace_id": "wrk_dummy"},
+    )
+    windows = [
+        {"kind": "session", "pct": 1.0, "reset_text": "3 hours 0 minutes"},
+        {"kind": "weekly", "pct": 20.0, "reset_text": "5 days 0 hours 0 minutes"},
+        {"kind": "monthly", "pct": 30.0, "reset_text": "20 days 0 hours 0 minutes"},
+    ]
+    legacy = {"n": 0}
+
+    def _legacy(*a, **k):
+        legacy["n"] += 1
+        return {"ok": False, "error": "should not be reached"}
+
+    monkeypatch.setattr(
+        data_server.gw, "fetch_go_status",
+        lambda *a, **k: {"ok": True, "windows": windows, "applied_credits": 0},
+    )
+    monkeypatch.setattr(data_server.gw, "scrape_server_usage", _legacy)
+    monkeypatch.setattr(data_server.ur, "full_sync", lambda *a, **k: {"ok": True})
+
+    status, data = helpers.http_post_json_response(
+        api_server + "/api/sync", {}, headers=helpers.auth_headers(api_token)
+    )
+    assert status == 200
+    assert data["ok"] is True
+    assert data["windows"] == windows
+    assert legacy["n"] == 0  # legacy path not attempted when the new API works
+
+
 def test_sync_scrape_failure(api_server, api_token, data_server, fixtures_dir, monkeypatch):
     _save_config(
         data_server, fixtures_dir,
         server={"auth_cookie": "dummy-cookie", "workspace_id": "wrk_dummy"},
     )
+    monkeypatch.setattr(data_server.gw, "fetch_go_status", lambda *a, **k: {"ok": False})
     monkeypatch.setattr(data_server.gw, "scrape_server_usage", lambda *a, **k: {"ok": False, "error": "x"})
 
     status, data = helpers.http_post_json_response(

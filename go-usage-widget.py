@@ -39,6 +39,8 @@ OPENCODE_AUTH = os.path.join(USERPROFILE, ".local", "share", "opencode", "auth.j
 GO_ENDPOINT = "https://opencode.ai/zen/go/v1/models"
 DASHBOARD_PREFIX = "https://opencode.ai/workspace/"
 DASHBOARD_SUFFIX = "/go"
+# 新版控制台 (SPA) 的官方 Go 配额接口。旧 /workspace/{ws}/go 已 302 到登录页。
+GO_STATUS_URL = "https://opencode.ai/console/api/go/status"
 DASH_USER_AGENT = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                    "(KHTML, like Gecko) Chrome/126.0 Safari/537.36")
 
@@ -1482,4 +1484,94 @@ def scrape_server_usage(auth_cookie, workspace_id, timeout=12):
             applied_dollars += int(am) / 100.0
     return {"ok": True, "windows": windows, "workspace_id": workspace_id,
             "applied_credits": applied_credits, "applied_dollars": applied_dollars}
+
+
+# 新控制台 Go 状态接口的 meters key -> 引擎窗口 kind
+_GO_METERS = (("fiveHour", "session"), ("week", "weekly"), ("month", "monthly"))
+_GO_LABELS = {"session": "5h", "weekly": "Weekly", "monthly": "Monthly"}
+_MICROCENTS_PER_UNIT = 100000000.0  # 1 美元 = 1e8 微美分
+
+
+def _go_reset_text(resets_at, now=None):
+    """把 resetsAt ISO 时间转成 forecasting.parse_reset_text 能解析的文本。"""
+    try:
+        t = datetime.fromisoformat(str(resets_at).replace("Z", "+00:00"))
+        if t.tzinfo is None:
+            t = t.replace(tzinfo=timezone.utc)
+        now = now or datetime.now(timezone.utc)
+        secs = int((t - now).total_seconds())
+    except Exception:
+        return ""
+    if secs <= 0:
+        return "now"
+    days, rem = divmod(secs, 86400)
+    hours, rem = divmod(rem, 3600)
+    minutes = rem // 60
+    parts = []
+    if days:
+        parts.append(f"{days} days")
+    if hours or days:
+        parts.append(f"{hours} hours")
+    parts.append(f"{minutes} minutes")
+    return " ".join(parts)
+
+
+def fetch_go_status(session_cookie, workspace_id, timeout=12):
+    """新版控制台官方 Go 配额: GET /console/api/go/status。
+
+    返回 {"ok": True, "windows": [{kind,label,pct,used,limit,reset_text}], ...}，
+    与 scrape_server_usage 的 windows 形状兼容（供 do_sync/_apply_server_quota 复用）。
+    会话 cookie 名称按账号不同: 新登录用 __Host-console_session, 旧登录用 auth；
+    依次尝试，命中即用。
+    """
+    if not session_cookie or not workspace_id:
+        return {"ok": False, "error": "缺少 session cookie 或 workspace ID"}
+    data = None
+    last_err = None
+    for cookie_name in ("__Host-console_session", "auth"):
+        try:
+            req = Request(GO_STATUS_URL, headers={
+                "User-Agent": DASH_USER_AGENT,
+                "Accept": "application/json",
+                "Origin": "https://opencode.ai",
+                "Referer": f"https://opencode.ai/console/{workspace_id}/go",
+                "x-org-id": workspace_id,
+                "Cookie": f"{cookie_name}={session_cookie}",
+            })
+            with urlopen(req, timeout=timeout) as resp:
+                raw = resp.read().decode("utf-8", errors="replace")
+            parsed = json.loads(raw)
+            if isinstance(parsed, dict):
+                data = parsed
+                break
+        except Exception as e:
+            last_err = e
+    if not isinstance(data, dict):
+        return {"ok": False, "error": f"请求失败: {last_err}"}
+    if not data.get("product"):
+        return {"ok": False, "error": "该账号不是 Go 订阅用户（go/status 无 product）"}
+    meters = ((data.get("access") or {}).get("meters") or {})
+    windows = []
+    for key, kind in _GO_METERS:
+        m = meters.get(key)
+        if not isinstance(m, dict):
+            continue
+        try:
+            limit = float(m.get("limitMicroCents") or 0) / _MICROCENTS_PER_UNIT
+            used = float(m.get("usedMicroCents") or 0) / _MICROCENTS_PER_UNIT
+        except (TypeError, ValueError):
+            continue
+        if limit <= 0:
+            continue
+        windows.append({
+            "kind": kind, "label": _GO_LABELS[kind],
+            "pct": round(used / limit * 100.0, 4),
+            "used": round(used, 6), "limit": round(limit, 6),
+            "reset_text": _go_reset_text(m.get("resetsAt")),
+        })
+    if not windows:
+        return {"ok": False, "error": "未能解析 Go 配额窗口"}
+    windows.sort(key=lambda w: {"session": 0, "weekly": 1, "monthly": 2}.get(w["kind"], 9))
+    return {"ok": True, "windows": windows, "workspace_id": workspace_id,
+            "applied_credits": 0, "applied_dollars": 0.0}
 
