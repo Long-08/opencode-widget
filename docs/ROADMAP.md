@@ -16,7 +16,7 @@
 | 5.1 | Frontend structure cleanup (no behavior change) | **COMPLETE** |
 | 5B | Advanced visualization (charts) | PLANNED |
 | 6A | Desktop lifecycle & hygiene | **COMPLETE** |
-| 6B | Notifications & tray UX | PLANNED |
+| 6B | Forecast notifications + minimal tray | **COMPLETE** |
 
 ## Permanent constraints
 
@@ -82,5 +82,10 @@ ownership on quit, orphan/idle watchdog, stale-runtime recovery, cookie-temp cle
 opt-in debug logging with rotation, production DevTools policy, port-collision behavior,
 and a documented DB retention policy. See `docs/PHASE6A_DESKTOP_LIFECYCLE.md`.
 
-**Phase 6B (PLANNED):** notifications/quota alerts, tray UX, autostart toggle UI.
-Also still deferred: formula signing/version pinning.
+**Phase 6B — Forecast notifications + minimal tray — COMPLETE.** Opt-in, default-off,
+reset-aware notifications consuming the Phase 4 forecast (dedupe, cooldown, escalation,
+quiet hours, startup baseline) plus a minimal tray (Show / Refresh / Notifications / Quit).
+See `docs/PHASE6B_NOTIFICATIONS.md`.
+
+Still deferred: notification history/center, complex settings UI, autostart toggle UI,
+and formula signing/version pinning.
