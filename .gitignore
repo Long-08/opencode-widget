@@ -14,3 +14,9 @@ pylib/
 
 # Electron 依赖（大体积二进制，不纳入版本控制）
 electron/node_modules/
+
+# 发布构建产物（本地生成，不纳入版本控制）
+dist/
+release/
+*.zip
+formula_cache.json
