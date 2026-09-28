@@ -17,6 +17,7 @@
 | 5B | Advanced visualization (timeline, matrix, forecast bars) | **COMPLETE** |
 | 6A | Desktop lifecycle & hygiene | **COMPLETE** |
 | 6B | Forecast notifications + minimal tray | **COMPLETE** |
+| 7 | Release hardening & packaging | **COMPLETE** (RC pending review) |
 
 ## Permanent constraints
 
@@ -91,3 +92,11 @@ See `docs/PHASE6B_NOTIFICATIONS.md`.
 
 Still deferred: notification history/center, complex settings UI, autostart toggle UI,
 and formula signing/version pinning.
+
+## Phase 7 — Release Hardening & Packaging (COMPLETE, RC pending review)
+
+Portable Windows Release Candidate `0.9.0-rc.1`: remote-formula validation/version/size/timeout/
+last-known-good/atomic adoption with an explicit unsigned trust model, versioned data-dir + config
+migrations, production sanitation, a reproducible build, and packaged lifecycle verification.
+See `docs/PHASE7_RELEASE_HARDENING.md` and `docs/PHASE7_RELEASE_AUDIT.md`.
+No auto-updater, no Authenticode signing, no remote publication.
