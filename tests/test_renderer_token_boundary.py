@@ -30,6 +30,9 @@ EXPECTED_WIDGET_API = {
     "apiGetViews",
     "apiGetView",
     "apiGetAgents",
+    "apiGetModels",
+    "apiGetProviders",
+    "apiGetSessions",
     "apiPostKey",
     "apiPostServer",
     "apiPostCalibrate",
@@ -141,7 +144,8 @@ def test_preload_has_no_api_env_and_exact_method_allowlist():
 def test_main_has_api_request_proxy_and_no_api_env_handler():
     src = _read(MAIN_JS)
     assert "api-request" in src
-    for route in ("/api/state", "/api/config", "/api/agents", "/api/sync"):
+    for route in ("/api/state", "/api/config", "/api/agents", "/api/sync",
+                  "/api/models", "/api/providers", "/api/sessions"):
         assert route in src
     assert "Authorization" in src
     assert "api-env" not in src

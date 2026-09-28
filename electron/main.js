@@ -285,8 +285,10 @@ function resolveApiTarget(req) {
   if (method === 'GET') {
     if (p === '/api/state' || p === '/api/config' || p === '/api/views') return { method, path: p, body: null };
     if (p === '/api/formula' || p === '/api/formula?refresh=1') return { method, path: p, body: null };
-    if (p === '/api/agents') return { method, path: p, body: null };
-    const ar = /^\/api\/agents\?range=([a-z0-9]+)$/.exec(p);
+    if (p === '/api/agents' || p === '/api/models' || p === '/api/providers' || p === '/api/sessions') {
+      return { method, path: p, body: null };
+    }
+    const ar = /^\/api\/(?:agents|models|providers|sessions)\?range=([a-z0-9]+)$/.exec(p);
     if (ar && API_AGENT_RANGES.has(ar[1])) return { method, path: p, body: null };
     const vm = /^\/api\/view\/([^/?#]+)$/.exec(p);
     if (vm && API_VIEW_ID_RE.test(vm[1])) return { method, path: '/api/view/' + encodeURIComponent(vm[1]), body: null };
