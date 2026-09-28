@@ -38,6 +38,7 @@ EXPECTED_WIDGET_API = {
     "apiGetModels",
     "apiGetProviders",
     "apiGetSessions",
+    "apiGetTimeline",
     "apiGetForecast",
     "apiPostKey",
     "apiPostServer",
@@ -155,7 +156,7 @@ def test_main_has_api_request_proxy_and_no_api_env_handler():
     assert "api-request" in src
     for route in ("/api/state", "/api/config", "/api/agents", "/api/sync",
                   "/api/forecast",
-                  "/api/models", "/api/providers", "/api/sessions"):
+                  "/api/models", "/api/providers", "/api/sessions", "/api/timeline"):
         assert route in src
     assert "Authorization" in src
     assert "api-env" not in src

@@ -77,7 +77,7 @@ test('dashCacheKey is range-independent for forecast', () => {
 });
 
 test('dashEndpointsFor returns a defensive copy', () => {
-  assert.deepEqual(core.dashEndpointsFor('overview'), ['agents', 'sessions']);
+  assert.deepEqual(core.dashEndpointsFor('overview'), ['agents', 'sessions', 'timeline']);
   assert.deepEqual(core.dashEndpointsFor('agents'), ['agents']);
   assert.deepEqual(core.dashEndpointsFor('models'), ['models']);
   assert.deepEqual(core.dashEndpointsFor('sessions'), ['sessions']);
@@ -85,7 +85,7 @@ test('dashEndpointsFor returns a defensive copy', () => {
   assert.deepEqual(core.dashEndpointsFor('nope'), []);
   const copy = core.dashEndpointsFor('overview');
   copy.push('x');
-  assert.deepEqual(core.dashEndpointsFor('overview'), ['agents', 'sessions']);
+  assert.deepEqual(core.dashEndpointsFor('overview'), ['agents', 'sessions', 'timeline']);
 });
 
 test('dashShouldFetch reflects cache presence', () => {
@@ -102,7 +102,7 @@ test('dashShouldFetch reflects cache presence', () => {
 
 test('dashLoad requested endpoint sets per tab', async () => {
   const expected = {
-    overview: ['agents', 'sessions'],
+    overview: ['agents', 'sessions', 'timeline'],
     agents: ['agents'],
     models: ['models'],
     sessions: ['sessions'],
@@ -118,6 +118,8 @@ test('dashLoad requested endpoint sets per tab', async () => {
     assert.deepEqual(res.fetched, expected[tab], tab);
     assert.deepEqual(rec.calls.map((c) => c[0]), expected[tab], tab);
     assert.ok(cache[key], tab + ' cache populated');
+    assert.deepEqual(cache[key].data, res.data, tab + ' cache stores data');
+    assert.deepEqual(res.errors, {}, tab + ' no errors');
     assert.deepEqual(Object.keys(res.data).sort(), expected[tab].slice().sort(), tab);
   }
 });
@@ -155,7 +157,7 @@ test('dashLoad force bypasses cache and updates only that key', async () => {
   const agentsBefore = cache['agents|all'];
   const res = await core.dashLoad('overview', 'today', cache, rec.fn, { force: true });
   assert.equal(res.fromCache, false);
-  assert.deepEqual(res.fetched, ['agents', 'sessions']);
+  assert.deepEqual(res.fetched, ['agents', 'sessions', 'timeline']);
   assert.notStrictEqual(cache['overview|today'], overviewBefore);
   assert.strictEqual(cache['agents|all'], agentsBefore, 'other keys untouched');
 });
@@ -174,12 +176,25 @@ test('rejected fetch does not populate cache and propagates', async () => {
   assert.deepEqual(rec.calls.map((c) => c[0]), ['agents']);
 });
 
-test('overview rejects when one endpoint rejects, cache stays empty', async () => {
+test('overview resolves with partial data when one endpoint rejects', async () => {
   const cache = {};
-  const failing = (name) => (name === 'sessions'
+  const failing = (name) => (name === 'timeline'
     ? Promise.reject(new Error('nope'))
-    : Promise.resolve({ agents: [] }));
-  await assert.rejects(() => core.dashLoad('overview', 'all', cache, failing, {}));
+    : Promise.resolve({ endpoint: name }));
+  const res = await core.dashLoad('overview', 'all', cache, failing, {});
+  assert.equal(res.fromCache, false);
+  assert.ok(res.data.agents, 'agents still loaded');
+  assert.ok(res.data.sessions, 'sessions still loaded');
+  assert.equal(res.data.timeline, undefined);
+  assert.ok(res.errors.timeline instanceof Error);
+  assert.ok(cache['overview|all'], 'partial result is cached');
+  assert.equal(cache['overview|all'].errors.timeline.message, 'nope');
+});
+
+test('overview rejects only when every endpoint rejects', async () => {
+  const cache = {};
+  const failing = () => Promise.reject(new Error('down'));
+  await assert.rejects(() => core.dashLoad('overview', 'all', cache, failing, {}), /down/);
   assert.equal(cache['overview|all'], undefined);
 });
 
