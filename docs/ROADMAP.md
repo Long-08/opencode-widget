@@ -14,7 +14,7 @@
 | 4 | Explainable usage forecasting | **COMPLETE** |
 | 5A | Observability Dashboard UI | **COMPLETE** |
 | 5.1 | Frontend structure cleanup (no behavior change) | **COMPLETE** |
-| 5B | Advanced visualization (charts) | PLANNED |
+| 5B | Advanced visualization (timeline, matrix, forecast bars) | **COMPLETE** |
 | 6A | Desktop lifecycle & hygiene | **COMPLETE** |
 | 6B | Forecast notifications + minimal tray | **COMPLETE** |
 
@@ -72,8 +72,10 @@ See `docs/PHASE5_DASHBOARD_UI.md`.
 `index.html` into `app.css` + `app.js` + `dashboard/*.js` classic-script modules with no
 behavior change; see `docs/PHASE5_1_FRONTEND_STRUCTURE.md`.
 
-**Phase 5B (PLANNED):** advanced visualization (charts in Agent/Model detail) and a Forecast
-screen once Phase 4 exists. Providers remains a filter/detail dimension, not a standalone tab.
+**Phase 5B — Advanced visualization — COMPLETE.** Usage Timeline (`/api/timeline`) on Overview,
+an Agent × Model usage matrix on Agents, and compact Forecast/quota bars — all rendering
+already-verified data with no recomputed business semantics. See
+`docs/PHASE5B_ADVANCED_VISUALIZATION.md`. Providers remains a filter/detail dimension.
 
 ## Phase 6 — Desktop UX & Hygiene
 
