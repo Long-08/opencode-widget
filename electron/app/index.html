@@ -240,6 +240,64 @@
   .m-msg { font-size: 11px; color: var(--green); margin-top: 8px; min-height: 15px; }
   .k-input { width: 100%; background: rgba(0,0,0,0.35); border: 1px solid var(--border); border-radius: 10px; color: var(--text); font-size: 11px; padding: 9px 12px; outline: none; margin-bottom: 10px; font-family: Consolas, monospace; }
   button:focus { outline: none; }
+
+  /* ---- Phase 5A: observability dashboard (large only, additive) ----
+     所有选择器以 .obs 前缀作用域化, 不影响 small/mid 及既有大窗样式。 */
+  .obs { display: none; flex: 1.4 1 0; min-height: 0; overflow: hidden; flex-direction: column; gap: 8px; }
+  .obs.on { display: flex; }
+  .obs-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-shrink: 0; }
+  .obs-tabs { display: flex; gap: 5px; }
+  .obs-tab { padding: 5px 14px; border-radius: 9px; font-size: 12px; font-weight: 400; color: var(--dim); background: var(--glass); border: 1px solid var(--border); cursor: pointer; transition: all .15s; letter-spacing: 0.3px; }
+  .obs-tab:hover { border-color: var(--border-light); color: var(--text); }
+  .obs-tab.on { background: rgba(99,102,241,0.18); border-color: rgba(99,102,241,0.45); color: #c7c9ff; font-weight: 600; }
+  .obs-range { display: flex; gap: 5px; }
+  .obs-r-btn { padding: 5px 12px; border-radius: 9px; font-size: 11.5px; font-weight: 400; color: var(--dim); background: var(--glass); border: 1px solid var(--border); cursor: pointer; transition: all .15s; }
+  .obs-r-btn:hover { border-color: var(--border-light); color: var(--text); }
+  .obs-r-btn.on { background: rgba(34,211,238,0.15); border-color: rgba(34,211,238,0.4); color: #a5f3fc; font-weight: 600; }
+  .obs-panels { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+  .obs-panels::-webkit-scrollbar { width: 5px; }
+  .obs-panels::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 3px; }
+  .obs-panel { display: none; flex-direction: column; gap: 8px; }
+  .obs-panel.on { display: flex; }
+  .obs-cards { display: flex; gap: 8px; flex-wrap: wrap; }
+  .obs-card { flex: 1 1 116px; min-width: 116px; background: var(--glass); border: 1px solid var(--border); border-radius: 11px; padding: 8px 12px; }
+  .obs-card .ok-k { font-size: 10px; font-weight: 400; color: var(--faded); letter-spacing: 0.3px; }
+  .obs-card .ok-v { font-size: 17px; font-weight: 500; color: var(--text); margin-top: 2px; white-space: nowrap; }
+  .obs-table-card { background: var(--glass); border: 1px solid var(--border); border-radius: 11px; padding: 8px 12px; }
+  .obs-table-card h4 { font-size: 12px; font-weight: 500; color: var(--text); margin-bottom: 6px; }
+  .obs-table { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+  .obs-table th { text-align: right; font-weight: 500; color: var(--faded); padding: 4px 8px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  .obs-table th:first-child, .obs-table td:first-child { text-align: left; }
+  .obs-table td { text-align: right; padding: 5px 8px; color: var(--text); border-bottom: 1px solid rgba(255,255,255,0.04); white-space: nowrap; }
+  .obs-table tbody tr:hover { background: rgba(255,255,255,0.04); }
+  .obs-th-btn { background: none; border: none; color: inherit; font: inherit; cursor: pointer; padding: 0; }
+  .obs-th-btn.on { color: #c7c9ff; font-weight: 600; }
+  .obs-badge { display: inline-block; margin-left: 6px; padding: 1px 6px; border-radius: 6px; font-size: 9.5px; color: #a5f3fc; background: rgba(34,211,238,0.14); border: 1px solid rgba(34,211,238,0.3); }
+  .obs-state { padding: 18px 12px; font-size: 12px; color: var(--dim); }
+  .obs-state.err { color: var(--danger); }
+  .obs-retry { margin-left: 10px; background: rgba(255,255,255,0.06); border: 1px solid var(--border); color: var(--text); border-radius: 8px; font-size: 11px; padding: 4px 10px; cursor: pointer; }
+  .obs-retry:hover { border-color: var(--border-light); }
+  .obs-filters { display: flex; gap: 6px; align-items: center; flex-shrink: 0; }
+  .obs-search { flex: 1 1 auto; min-width: 0; background: rgba(0,0,0,0.35); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 11.5px; padding: 5px 10px; outline: none; }
+  .obs-search:focus { border-color: rgba(99,102,241,0.5); }
+  .obs-select { background: rgba(0,0,0,0.35); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 11.5px; padding: 5px 8px; outline: none; max-width: 220px; }
+  .obs-btn { background: var(--glass); border: 1px solid var(--border); color: var(--dim); border-radius: 8px; font-size: 11.5px; padding: 5px 12px; cursor: pointer; transition: all .15s; }
+  .obs-btn:hover { border-color: var(--border-light); color: var(--text); }
+  .obs-view { flex: 1 1 auto; min-height: 0; }
+  .obs-split { display: flex; gap: 8px; align-items: flex-start; }
+  .obs-main { flex: 1 1 auto; min-width: 0; }
+  .obs-drawer { flex: 0 0 320px; max-width: 48%; background: var(--glass); border: 1px solid var(--border); border-radius: 11px; padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+  .obs-drawer[hidden] { display: none; }
+  .obs-drawer h4 { font-size: 12px; font-weight: 500; color: var(--text); margin-bottom: 2px; }
+  .obs-detail-metrics { display: flex; flex-wrap: wrap; gap: 4px 12px; }
+  .obs-detail-item { font-size: 10.5px; color: var(--dim); }
+  .obs-detail-item b { color: var(--text); font-weight: 500; margin-left: 4px; }
+  .obs-row-link { cursor: pointer; }
+  .obs-row-link.sel { background: rgba(99,102,241,0.16); }
+  .obs-tree-toggle { display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px; margin-right: 4px; border-radius: 4px; background: rgba(255,255,255,0.06); border: 1px solid var(--border); color: var(--dim); font-size: 9px; line-height: 1; cursor: pointer; vertical-align: middle; }
+  .obs-tree-toggle:hover { color: var(--text); border-color: var(--border-light); }
+  .obs-tree-toggle.leaf { visibility: hidden; }
+  .obs-indent { display: inline-block; }
 </style>
 </head>
 <body>
@@ -364,6 +422,48 @@
           <div class="m-list" id="dList"></div>
         </div>
       </div>
+
+      <!-- Phase 5A: 可观测性仪表盘 (仅大窗显示; 内部区块懒加载) -->
+      <section class="obs" id="obsDashboard" aria-label="Observability dashboard">
+        <div class="obs-toolbar">
+          <div class="obs-tabs" id="obsTabs" role="tablist" aria-label="Observability views">
+            <button class="obs-tab on" type="button" role="tab" data-tab="overview" aria-label="Overview" aria-selected="true">Overview</button>
+            <button class="obs-tab" type="button" role="tab" data-tab="agents" aria-label="Agents" aria-selected="false">Agents</button>
+            <button class="obs-tab" type="button" role="tab" data-tab="models" aria-label="Models" aria-selected="false">Models</button>
+            <button class="obs-tab" type="button" role="tab" data-tab="sessions" aria-label="Sessions" aria-selected="false">Sessions</button>
+          </div>
+          <div class="obs-range" id="obsRange" role="group" aria-label="Time range">
+            <button class="obs-r-btn on" type="button" data-range="today" aria-label="Today" aria-pressed="true">Today</button>
+            <button class="obs-r-btn" type="button" data-range="7d" aria-label="7 Days" aria-pressed="false">7 Days</button>
+            <button class="obs-r-btn" type="button" data-range="30d" aria-label="Current Period" aria-pressed="false">Current Period</button>
+            <button class="obs-r-btn" type="button" data-range="all" aria-label="All" aria-pressed="false">All</button>
+          </div>
+        </div>
+        <div class="obs-panels">
+          <section class="obs-panel on" data-panel="overview" aria-label="Overview panel"></section>
+          <section class="obs-panel" data-panel="agents" aria-label="Agents panel">
+            <div class="obs-filters">
+              <input class="obs-search" id="obsAgentSearch" type="search" placeholder="Search agent or group" aria-label="Search agents" autocomplete="off">
+              <select class="obs-select" id="obsAgentProvider" aria-label="Provider filter"><option value="">All providers</option></select>
+            </div>
+            <div class="obs-view" id="obsAgentsView"></div>
+          </section>
+          <section class="obs-panel" data-panel="models" aria-label="Models panel">
+            <div class="obs-filters">
+              <input class="obs-search" id="obsModelSearch" type="search" placeholder="Search model, provider or source" aria-label="Search models" autocomplete="off">
+              <select class="obs-select" id="obsModelProvider" aria-label="Provider filter"><option value="">All providers</option></select>
+            </div>
+            <div class="obs-view" id="obsModelsView"></div>
+          </section>
+          <section class="obs-panel" data-panel="sessions" aria-label="Sessions panel">
+            <div class="obs-filters">
+              <button class="obs-btn" type="button" data-obs-expand="all">Expand all</button>
+              <button class="obs-btn" type="button" data-obs-collapse="all">Collapse all</button>
+            </div>
+            <div class="obs-view" id="obsSessionsView"></div>
+          </section>
+        </div>
+      </section>
     </div>
   </div>
 
@@ -421,6 +521,720 @@
 const $ = (s) => document.querySelector(s);
 // HTML 转义：所有来自 API/DB/formula/配置的数据插入 innerHTML 前必须经过
 const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+/* ==== phase5a-core:start ====
+   DOM-free shared dashboard core (Phase 5A). Pure display/sort/fetch helpers;
+   no business metrics are recomputed here. Extractable for node:test.
+   The only front-end aggregate is summing API-provided Overview numbers. */
+const DASH_TABS = ['overview', 'agents', 'models', 'sessions'];
+const DASH_RANGES = ['today', '7d', '30d', 'all'];
+const DASH_ENDPOINTS = {
+  overview: ['agents', 'sessions'],
+  agents: ['agents'],
+  models: ['models'],
+  sessions: ['sessions'],
+};
+
+// 规范化 range: 仅接受 DASH_RANGES, 其余回退 'all' (与后端 OBS_RANGES 对齐)
+function dashRangeValue(r) {
+  return DASH_RANGES.indexOf(r) >= 0 ? r : 'all';
+}
+
+function dashCacheKey(tab, range) {
+  return tab + '|' + dashRangeValue(range);
+}
+
+function dashEndpointsFor(tab) {
+  return (DASH_ENDPOINTS[tab] || []).slice();
+}
+
+function dashShouldFetch(tab, range, cache) {
+  if (!cache) return true;
+  return !Object.prototype.hasOwnProperty.call(cache, dashCacheKey(tab, range));
+}
+
+// Lazy loader: 命中缓存且非 force 时直接返回; 缓存键为 dashCacheKey。
+// 任一 fetch 被 reject 时不写入缓存并向上抛出 (只更新本次涉及的键)。
+async function dashLoad(tab, range, cache, fetchTab, opts) {
+  opts = opts || {};
+  const key = dashCacheKey(tab, range);
+  const endpoints = dashEndpointsFor(tab);
+  if (!opts.force && cache && Object.prototype.hasOwnProperty.call(cache, key)) {
+    return { key: key, fromCache: true, data: cache[key], fetched: [] };
+  }
+  const results = await Promise.all(endpoints.map(function (name) {
+    return Promise.resolve().then(function () { return fetchTab(name, range); });
+  }));
+  const data = {};
+  endpoints.forEach(function (name, i) { data[name] = results[i]; });
+  if (cache) cache[key] = data;
+  return { key: key, fromCache: false, data: data, fetched: endpoints.slice() };
+}
+
+// 通用升序比较: null/undefined/'' 视为最小值; 数字按数值, 其余按字符串。
+function dashCompare(a, b) {
+  const an = a == null || a === '';
+  const bn = b == null || b === '';
+  if (an && bn) return 0;
+  if (an) return -1;
+  if (bn) return 1;
+  if (typeof a === 'number' && typeof b === 'number') {
+    if (a < b) return -1;
+    if (a > b) return 1;
+    return 0;
+  }
+  const as = String(a);
+  const bs = String(b);
+  if (as < bs) return -1;
+  if (as > bs) return 1;
+  return 0;
+}
+
+// 稳定排序: 主字段 desc/asc, 再按 secondary (默认 name) 升序, 最后按原序兜底。
+function dashSortRows(rows, field, dir, secondary) {
+  const mul = dir === 'asc' ? 1 : -1;
+  const sec = secondary || 'name';
+  return (rows || []).map(function (row, i) { return { row: row, i: i }; })
+    .sort(function (a, b) {
+      const p = dashCompare(a.row ? a.row[field] : null, b.row ? b.row[field] : null);
+      if (p !== 0) return p * mul;
+      const s = dashCompare(a.row ? a.row[sec] : null, b.row ? b.row[sec] : null);
+      if (s !== 0) return s;
+      return a.i - b.i;
+    })
+    .map(function (x) { return x.row; });
+}
+
+function dashNull(v) {
+  return v == null ? '—' : v;
+}
+
+function formatInteger(n) {
+  if (n == null) return '—';
+  const num = Number(n);
+  if (!isFinite(num)) return '—';
+  return Math.round(num).toLocaleString('en-US');
+}
+
+function formatTokens(n) {
+  if (n == null) return '—';
+  const num = Number(n);
+  if (!isFinite(num)) return '—';
+  const abs = Math.abs(num);
+  const trim = function (v) {
+    const r = Math.round(v * 10) / 10;
+    return Number.isInteger(r) ? String(r) : r.toFixed(1);
+  };
+  if (abs >= 1e9) return trim(num / 1e9) + 'B';
+  if (abs >= 1e6) return trim(num / 1e6) + 'M';
+  if (abs >= 1e3) return trim(num / 1e3) + 'K';
+  return String(Math.round(num));
+}
+
+function formatCost(n) {
+  if (n == null) return '—';
+  const num = Number(n);
+  if (!isFinite(num)) return '—';
+  if (num === 0) return '$0.00';
+  const abs = Math.abs(num);
+  if (abs < 0.001) return '< $0.001';
+  if (abs < 0.01) return '$' + num.toFixed(4);
+  if (abs < 1) return '$' + num.toFixed(3);
+  return '$' + num.toFixed(2);
+}
+
+function formatPercent(r) {
+  if (r == null) return '—';
+  const num = Number(r);
+  if (!isFinite(num)) return '—';
+  return (num * 100).toFixed(1) + '%';
+}
+
+function formatDuration(ms) {
+  if (ms == null) return '—';
+  const num = Number(ms);
+  if (!isFinite(num)) return '—';
+  const abs = Math.abs(num);
+  if (abs < 1000) return Math.round(num) + 'ms';
+  const s = num / 1000;
+  if (Math.abs(s) < 60) return (Math.round(s * 10) / 10) + 's';
+  const m = s / 60;
+  if (Math.abs(m) < 60) return (Math.round(m * 10) / 10) + 'm';
+  const h = m / 60;
+  if (Math.abs(h) < 24) return (Math.round(h * 10) / 10) + 'h';
+  return (Math.round((h / 24) * 10) / 10) + 'd';
+}
+
+function formatDateTime(ms) {
+  if (ms == null) return '—';
+  const num = Number(ms);
+  if (!isFinite(num)) return '—';
+  const d = new Date(num);
+  if (isNaN(d.getTime())) return '—';
+  const p = function (x) { return x < 10 ? '0' + x : String(x); };
+  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate())
+    + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+}
+
+function shortSessionId(id) {
+  if (id == null) return '—';
+  const s = String(id);
+  if (s.length <= 12) return s;
+  return s.slice(0, 6) + '…' + s.slice(-3);
+}
+
+// reader.meta -> 'ok' | 'unsupported' | 'missing' | 'error' (status 优先, schema 兜底)
+function readerState(meta) {
+  if (!meta || typeof meta !== 'object') return 'error';
+  const status = meta.status;
+  if (status === 'ok') return 'ok';
+  if (status === 'unsupported_schema') return 'unsupported';
+  if (status === 'missing_db') return 'missing';
+  if (status === 'error') return 'error';
+  if (status != null) return 'error';
+  const schema = meta.schema;
+  if (schema === 'current' || schema === 'legacy') return 'ok';
+  if (schema === 'unsupported') return 'unsupported';
+  if (schema === 'missing') return 'missing';
+  return 'error';
+}
+
+function readerMessage(state) {
+  if (state === 'ok') return '';
+  if (state === 'unsupported') return 'OpenCode usage database schema is not supported.';
+  if (state === 'missing') return 'OpenCode usage database was not found.';
+  return 'OpenCode usage data could not be read.';
+}
+
+// tokens 对象取 total; 数字原样; 其它转数字。无效 -> null。
+function dashMetric(v) {
+  if (v == null) return null;
+  if (typeof v === 'number') return isNaN(v) ? null : v;
+  if (typeof v === 'object') {
+    const t = v.total;
+    if (t == null) return null;
+    const tn = Number(t);
+    return isNaN(tn) ? null : tn;
+  }
+  const n = Number(v);
+  return isNaN(n) ? null : n;
+}
+
+function topBy(rows, field) {
+  if (!rows || !rows.length) return null;
+  let best = null;
+  let bestV = null;
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    if (!row) continue;
+    const v = dashMetric(row[field]);
+    if (v == null) continue;
+    if (bestV == null || v > bestV) { best = row; bestV = v; }
+  }
+  return best;
+}
+
+function topAgentOf(modelItem) {
+  if (!modelItem || !modelItem.agents) return null;
+  return topBy(modelItem.agents, 'tokens');
+}
+
+function topModelOfAgent(agentItem) {
+  if (!agentItem || !agentItem.models) return null;
+  return topBy(agentItem.models, 'tokens');
+}
+
+// Overview 唯一允许的前端聚合: 对 API 已提供的数字求和。
+function overviewSummary(agents, sessions) {
+  const a = agents || [];
+  const s = sessions || [];
+  let requests = 0, tokens = 0, rawCost = 0, cacheRead = 0, input = 0;
+  const modelKeys = {};
+  for (let i = 0; i < a.length; i++) {
+    const item = a[i] || {};
+    requests += item.requests || 0;
+    const t = item.tokens || {};
+    tokens += t.total || 0;
+    cacheRead += t.cache_read || 0;
+    input += t.input || 0;
+    rawCost += item.cost || 0;
+    const models = item.models || [];
+    for (let j = 0; j < models.length; j++) {
+      const m = models[j] || {};
+      modelKeys[m.model + '|' + m.provider + '|' + m.variant] = true;
+    }
+  }
+  const denom = input + cacheRead;
+  return {
+    requests: requests,
+    tokens: tokens,
+    raw_cost: rawCost,
+    cache_read_ratio: denom ? cacheRead / denom : null,
+    active_agents: a.length,
+    active_models: Object.keys(modelKeys).length,
+    sessions: s.length,
+  };
+}
+
+// 将各 agent 的 models[] 按 (model, provider, variant) 汇总; top_agent = tokens 最高者。
+function topModelsFromAgents(agents) {
+  const a = agents || [];
+  const map = {};
+  for (let i = 0; i < a.length; i++) {
+    const agent = a[i] || {};
+    const models = agent.models || [];
+    for (let j = 0; j < models.length; j++) {
+      const m = models[j] || {};
+      const key = m.model + '|' + m.provider + '|' + m.variant;
+      let entry = map[key];
+      if (!entry) {
+        entry = map[key] = {
+          model: m.model, provider: m.provider, variant: m.variant,
+          requests: 0, tokens: 0, raw_cost: 0,
+          top_agent: null, _top_tokens: -1,
+        };
+      }
+      entry.requests += m.requests || 0;
+      const mt = dashMetric(m.tokens) || 0;
+      entry.tokens += mt;
+      entry.raw_cost += m.cost || 0;
+      if (mt > entry._top_tokens) { entry._top_tokens = mt; entry.top_agent = agent.agent; }
+    }
+  }
+  const out = Object.keys(map).map(function (k) { return map[k]; });
+  out.forEach(function (e) { delete e._top_tokens; });
+  out.sort(function (x, y) { return y.tokens - x.tokens; });
+  return out;
+}
+
+// markup helpers 内部一律 esc(); 仅返回文本的 helper 不含任何标签。
+function dashHtmlText(v) {
+  return esc(dashNull(v));
+}
+
+function dashGroupBadge(group) {
+  if (group == null || group === '') return '';
+  return '<span class="obs-badge">' + esc(String(group)) + '</span>';
+}
+/* ==== phase5a-core:end ==== */
+
+/* ==== phase5a-views:start ====
+   DOM-free Phase 5A view-models + display helpers for the Agents/Models/Sessions
+   panels. These consume backend payloads only (no metric recomputation). Raw
+   shares stay 0..1 so they can be formatted with formatPercent at render time.
+   Any string that reaches innerHTML goes through esc(): dashCell()/dashStateHtml()
+   escape text, while the *Html helpers only wrap already-escaped cell objects. */
+
+// A single table cell. `text`/`title` are escaped here so callers can never inject
+// remote values; `cls` is a local constant.
+function dashCell(text, title, cls) {
+  return {
+    text: esc(dashNull(text)),
+    title: title == null ? "" : esc(String(title)),
+    cls: cls == null ? "" : String(cls),
+  };
+}
+
+// Wrap already-escaped cell objects into <td>s.
+function dashCellsHtml(cells) {
+  const list = cells || [];
+  let html = "";
+  for (let i = 0; i < list.length; i++) {
+    const c = list[i] || {};
+    html += "<td" + (c.cls ? ' class="' + esc(c.cls) + '"' : "")
+      + (c.title ? ' title="' + c.title + '"' : "")
+      + ">" + (c.text == null ? "" : c.text) + "</td>";
+  }
+  return html;
+}
+
+function dashStateHtml(text, isError) {
+  return '<div class="obs-state' + (isError ? " err" : "") + '">' + esc(text) + "</div>";
+}
+
+function dashErrorHtml(text, tab) {
+  return '<div class="obs-state err">' + esc(text)
+    + '<button class="obs-retry" type="button" data-obs-retry="' + esc(tab) + '">Retry</button></div>';
+}
+
+// reader.meta -> message ('' when ok). Pure; never renders fake zeros.
+function dashReaderError(resp) {
+  const state = readerState(resp && resp.reader);
+  return state === "ok" ? "" : readerMessage(state);
+}
+
+function numOrNull(v) {
+  if (v == null) return null;
+  const n = Number(v);
+  return isNaN(n) ? null : n;
+}
+
+function normQuery(q) {
+  return String(q == null ? "" : q).trim().toLowerCase();
+}
+
+function dashContains(v, query) {
+  return v != null && query !== "" && String(v).toLowerCase().indexOf(query) >= 0;
+}
+
+// ---- filters ---------------------------------------------------------------
+
+function filterAgents(rows, q) {
+  const query = normQuery(q);
+  const list = rows || [];
+  if (!query) return list.slice();
+  return list.filter(function (r) {
+    return !!r && (dashContains(r.agent, query) || dashContains(r.group, query));
+  });
+}
+
+function filterModels(rows, q) {
+  const query = normQuery(q);
+  const list = rows || [];
+  if (!query) return list.slice();
+  return list.filter(function (r) {
+    return !!r && (dashContains(r.model, query)
+      || dashContains(r.provider_id, query) || dashContains(r.source, query));
+  });
+}
+
+function filterSessions(rows, q) {
+  const query = normQuery(q);
+  const list = rows || [];
+  if (!query) return list.slice();
+  return list.filter(function (r) { return !!r && dashContains(r.session_id, query); });
+}
+
+// ---- provider / source options --------------------------------------------
+
+// Composite provider identity used by both the <select> and filterByProvider.
+function providerKey(r) {
+  if (!r) return "";
+  const pid = r.provider_id == null ? "" : String(r.provider_id);
+  const src = r.source == null ? "" : String(r.source);
+  return pid + "|" + src;
+}
+
+// Distinct {key,label} discovered from loaded data (dynamic; no hardcoding).
+function providerOptions(rows) {
+  const seen = {};
+  const out = [];
+  const list = rows || [];
+  for (let i = 0; i < list.length; i++) {
+    const r = list[i];
+    if (!r) continue;
+    const key = providerKey(r);
+    if (Object.prototype.hasOwnProperty.call(seen, key)) continue;
+    seen[key] = true;
+    const pid = r.provider_id == null ? "" : String(r.provider_id);
+    const src = r.source == null ? "" : String(r.source);
+    let label;
+    if (src && pid) label = src + " · " + pid;
+    else if (src) label = src;
+    else if (pid) label = pid;
+    else label = "—";
+    out.push({ key: key, label: label });
+  }
+  return out;
+}
+
+// '' or null => no filtering. Matches a direct provider identity, or (for agent
+// rows) a nested providers[] entry.
+function filterByProvider(rows, key) {
+  const list = rows || [];
+  if (key == null || key === "") return list.slice();
+  return list.filter(function (r) {
+    if (!r) return false;
+    if (providerKey(r) === key) return true;
+    const provs = r.providers;
+    if (provs && provs.length) {
+      for (let i = 0; i < provs.length; i++) {
+        if (providerKey(provs[i]) === key) return true;
+      }
+    }
+    return false;
+  });
+}
+
+// ---- row cells (Agents / Models / Sessions) --------------------------------
+
+// Agent row: raw agent name primary (group is a separate badge), then display
+// metrics. Returns {cells, groupBadge}.
+function agentRowCells(a) {
+  a = a || {};
+  const tm = topModelOfAgent(a);
+  const cells = [
+    dashCell(a.agent, a.agent, "obs-cell-agent"),
+    dashCell(formatInteger(a.requests), null, ""),
+    dashCell(formatInteger(a.sessions), null, ""),
+    dashCell(formatTokens(dashMetric(a.tokens)), null, ""),
+    dashCell(formatCost(a.cost), null, ""),
+    dashCell(formatPercent(a.cache_read_ratio), null, ""),
+    dashCell(formatTokens(dashMetric(a.avg_tokens_per_request)), null, ""),
+    dashCell(formatDuration(a.avg_duration_per_request), null, ""),
+    dashCell(tm ? tm.model : null,
+      tm ? dashNull(tm.model) + (tm.variant ? " · " + tm.variant : "") : "", ""),
+  ];
+  return { cells: cells, groupBadge: dashGroupBadge(a.group) };
+}
+
+// Model row: variant null -> '—'; Top Agent = topAgentOf(m).agent.
+function modelRowCells(m) {
+  m = m || {};
+  const ta = topAgentOf(m);
+  const cells = [
+    dashCell(m.model, m.model, "obs-cell-model"),
+    dashCell(m.provider_id, null, ""),
+    dashCell(m.source, null, ""),
+    dashCell(m.variant, null, ""),
+    dashCell(formatInteger(m.requests), null, ""),
+    dashCell(formatInteger(m.sessions), null, ""),
+    dashCell(formatTokens(dashMetric(m.tokens)), null, ""),
+    dashCell(formatCost(m.cost), null, ""),
+    dashCell(formatPercent(m.cache_read_ratio), null, ""),
+    dashCell(ta ? ta.agent : null, null, ""),
+  ];
+  return { cells: cells };
+}
+
+// One tree row -> display cells (session_id shortened, full id in the title).
+function sessionRowCells(row) {
+  row = row || {};
+  return {
+    cells: [
+      dashCell(shortSessionId(row.session_id), row.session_id, "obs-cell-session"),
+      dashCell(formatInteger(row.depth), null, "obs-cell-depth"),
+      dashCell(formatInteger(row.requests), null, ""),
+      dashCell(formatTokens(row.tokens), null, ""),
+      dashCell(formatCost(row.raw_cost), null, ""),
+      dashCell(formatInteger(row.agents_count), null, ""),
+      dashCell(formatInteger(row.children_count), null, ""),
+    ],
+  };
+}
+
+// Consume the BACKEND tree only. Never recompute depth/cycles/missing-parent.
+// Emits a row when the node and all its ancestors are expanded. Defensive when
+// sessions[] and tree.nodes disagree.
+function sessionTreeRows(sessions, tree, expandedSet) {
+  const nodeList = (tree && tree.nodes) || [];
+  const metrics = {};
+  const sess = sessions || [];
+  for (let i = 0; i < sess.length; i++) {
+    const s = sess[i] || {};
+    if (s.session_id == null) continue;
+    metrics[String(s.session_id)] = s;
+  }
+
+  const nodeById = {};
+  const order = [];
+  for (let i = 0; i < nodeList.length; i++) {
+    const n = nodeList[i] || {};
+    if (n.session_id == null) continue;
+    const id = String(n.session_id);
+    if (Object.prototype.hasOwnProperty.call(nodeById, id)) continue;
+    nodeById[id] = n;
+    order.push(id);
+  }
+
+  const expanded = expandedSet && typeof expandedSet.has === "function" ? expandedSet : null;
+  const isExpanded = function (id) { return expanded ? expanded.has(id) : false; };
+
+  const childrenOf = {};
+  const roots = [];
+  for (let i = 0; i < order.length; i++) {
+    const id = order[i];
+    const n = nodeById[id];
+    const p = n.parent_session_id;
+    const pid = p == null ? null : String(p);
+    const missingParent = pid != null && !Object.prototype.hasOwnProperty.call(nodeById, pid);
+    const root = n.is_root === true || pid == null || pid === id || missingParent;
+    if (root) roots.push(id);
+    else (childrenOf[pid] || (childrenOf[pid] = [])).push(id);
+  }
+
+  const rows = [];
+  const visited = {};
+  const walk = function (id, ancestorsExpanded) {
+    if (visited[id]) return;
+    visited[id] = true;
+    if (!ancestorsExpanded) return; // collapsed ancestor -> hide whole subtree
+    const n = nodeById[id];
+    const m = metrics[id];
+    const found = !!m;
+    const cc = numOrNull(n.children_count);
+    const ex = isExpanded(id);
+    rows.push({
+      session_id: id,
+      parent_session_id: n.parent_session_id == null ? null : String(n.parent_session_id),
+      depth: numOrNull(n.depth),
+      requests: found ? dashMetric(m.requests) : null,
+      tokens: found ? dashMetric(m.tokens) : null,
+      raw_cost: found ? dashMetric(m.cost) : null,
+      agents_count: found && m.agents ? m.agents.length : null,
+      children_count: cc,
+      has_children: (cc || 0) > 0,
+      expanded: ex,
+    });
+    const kids = childrenOf[id] || [];
+    for (let j = 0; j < kids.length; j++) walk(kids[j], ex);
+  };
+  for (let i = 0; i < roots.length; i++) walk(roots[i], true);
+  return rows;
+}
+
+// ---- detail view-models ----------------------------------------------------
+
+// metrics + models rows (raw 0..1 shares preserved) + providers rows.
+function agentDetailModel(a) {
+  a = a || {};
+  const models = (a.models || []).map(function (m) {
+    m = m || {};
+    return {
+      model: m.model,
+      provider: m.provider,
+      variant: m.variant,
+      requests: dashMetric(m.requests),
+      tokens: dashMetric(m.tokens),
+      raw_cost: dashMetric(m.cost),
+      cache_read_ratio: m.cache_read_ratio,
+      request_share: m.request_share,
+      token_share: m.token_share,
+      cost_share: m.cost_share,
+    };
+  });
+  const providers = (a.providers || []).map(function (p) {
+    p = p || {};
+    return {
+      provider_id: p.provider_id,
+      source: p.source,
+      requests: dashMetric(p.requests),
+      tokens: dashMetric(p.tokens),
+      raw_cost: dashMetric(p.cost),
+      cache_read_ratio: p.cache_read_ratio,
+    };
+  });
+  return {
+    agent: a.agent,
+    group: a.group,
+    metrics: {
+      requests: dashMetric(a.requests),
+      sessions: dashMetric(a.sessions),
+      tokens: dashMetric(a.tokens),
+      raw_cost: dashMetric(a.cost),
+      cache_read_ratio: a.cache_read_ratio,
+      avg_tokens_per_request: a.avg_tokens_per_request,
+      avg_duration_per_request: a.avg_duration_per_request,
+    },
+    models: models,
+    providers: providers,
+  };
+}
+
+// metrics + agents breakdown rows.
+function modelDetailModel(m) {
+  m = m || {};
+  const agents = (m.agents || []).map(function (x) {
+    x = x || {};
+    return {
+      agent: x.agent,
+      group: x.group,
+      requests: dashMetric(x.requests),
+      tokens: dashMetric(x.tokens),
+      raw_cost: dashMetric(x.cost),
+      cache_read_ratio: x.cache_read_ratio,
+    };
+  });
+  return {
+    model: m.model,
+    provider_id: m.provider_id,
+    source: m.source,
+    variant: m.variant,
+    metrics: {
+      requests: dashMetric(m.requests),
+      sessions: dashMetric(m.sessions),
+      tokens: dashMetric(m.tokens),
+      raw_cost: dashMetric(m.cost),
+      cache_read_ratio: m.cache_read_ratio,
+    },
+    agents: agents,
+  };
+}
+
+// Session metadata + agents/models/providers rows. Deliberately excludes any
+// content/prompt/response/reasoning/tool/path/title field.
+function sessionDetailModel(s) {
+  s = s || {};
+  const mapAgent = function (x) {
+    x = x || {};
+    return {
+      agent: x.agent, group: x.group,
+      requests: dashMetric(x.requests),
+      tokens: dashMetric(x.tokens),
+      raw_cost: dashMetric(x.cost),
+    };
+  };
+  const mapModel = function (x) {
+    x = x || {};
+    return {
+      model: x.model, provider_id: x.provider_id, variant: x.variant,
+      requests: dashMetric(x.requests),
+      tokens: dashMetric(x.tokens),
+      raw_cost: dashMetric(x.cost),
+    };
+  };
+  const mapProvider = function (x) {
+    x = x || {};
+    return {
+      provider_id: x.provider_id, source: x.source,
+      requests: dashMetric(x.requests),
+      tokens: dashMetric(x.tokens),
+      raw_cost: dashMetric(x.cost),
+    };
+  };
+  return {
+    session_id: s.session_id,
+    parent_session_id: s.parent_session_id,
+    start_ts: s.start_ts,
+    end_ts: s.end_ts,
+    duration_ms: s.duration_ms,
+    requests: dashMetric(s.requests),
+    tokens: dashMetric(s.tokens),
+    raw_cost: dashMetric(s.cost),
+    agents: (s.agents || []).map(mapAgent),
+    models: (s.models || []).map(mapModel),
+    providers: (s.providers || []).map(mapProvider),
+  };
+}
+
+// ---- small display helpers -------------------------------------------------
+
+function dashSortBtn(tab, field, label, activeField) {
+  return '<button class="obs-th-btn' + (activeField === field ? " on" : "")
+    + '" type="button" data-obs-tab="' + esc(tab) + '" data-obs-sort="' + esc(field) + '">'
+    + esc(label) + "</button>";
+}
+
+function dashMetricsHtml(items) {
+  let html = '<div class="obs-detail-metrics">';
+  const list = items || [];
+  for (let i = 0; i < list.length; i++) {
+    html += '<span class="obs-detail-item">' + esc(list[i][0]) + "<b>" + esc(dashNull(list[i][1])) + "</b></span>";
+  }
+  return html + "</div>";
+}
+
+function dashDetailTable(title, headers, rows) {
+  let html = '<div class="obs-table-card"><h4>' + esc(title) + '</h4><table class="obs-table"><thead><tr>';
+  const hs = headers || [];
+  for (let i = 0; i < hs.length; i++) html += "<th>" + esc(hs[i]) + "</th>";
+  html += "</tr></thead><tbody>";
+  const rs = rows || [];
+  for (let i = 0; i < rs.length; i++) html += "<tr>" + dashCellsHtml(rs[i]) + "</tr>";
+  return html + "</tbody></table></div>";
+}
+/* ==== phase5a-views:end ==== */
+
 
 // 本地 API 由主进程代理（window.widgetAPI.apiGet*/apiPost*），token 不下发渲染层；
 // 各调用点沿用原有 try/catch 与默认值兜底。
@@ -1459,6 +2273,635 @@ render();
   box.innerHTML = h;
 }
 
+// ---- Phase 5A: observability dashboard (large only) ------------------------
+// 懒加载: 仅在 .obs 可见(大窗)时按需拉取; 首次只加载当前 tab; 切 range 只刷新当前 tab。
+// 模块级内存缓存 (无 localStorage/sessionStorage), 键为 dashCacheKey。
+const dashCache = {};
+let obsTab = "overview";
+let obsRange = "today";
+let obsAgentSort = "tokens";
+const obsPanels = {}; // tab -> { status: 'idle'|'loading'|'ok'|'error', data }
+
+// Agents / Models / Sessions panel state (kept out of the render functions so
+// search input focus and expansion survive re-renders).
+let obsAgentsSort = "tokens";
+let obsAgentsQuery = "";
+let obsAgentsProvider = "";
+let obsAgentsSelected = null;
+let obsAgentsRows = [];
+let obsModelsSort = "tokens";
+let obsModelsQuery = "";
+let obsModelsProvider = "";
+let obsModelsSelected = null;
+let obsModelsRows = [];
+let obsSessionsExpanded = null; // null until first successful load -> roots default
+let obsSessionsRows = [];
+let obsSessionsData = [];
+let obsSessionsTree = null;
+let obsSelectedSession = null;
+
+function obsApi(name, range) {
+  const r = dashRangeValue(range);
+  if (name === "agents") return window.widgetAPI.apiGetAgents(r);
+  if (name === "models") return window.widgetAPI.apiGetModels(r);
+  if (name === "sessions") return window.widgetAPI.apiGetSessions(r);
+  return Promise.reject(new Error("unknown endpoint"));
+}
+
+function obsStateHtml(text, isError) {
+  return '<div class="obs-state' + (isError ? ' err' : '') + '">' + esc(text) + '</div>';
+}
+
+function obsErrorHtml(text, tab) {
+  return '<div class="obs-state err">' + esc(text)
+    + '<button class="obs-retry" type="button" data-obs-retry="' + esc(tab) + '">Retry</button></div>';
+}
+
+function obsSetActiveUI() {
+  const tabsBox = document.getElementById("obsTabs");
+  if (tabsBox) {
+    tabsBox.querySelectorAll(".obs-tab").forEach(function (b) {
+      const on = b.dataset.tab === obsTab;
+      b.classList.toggle("on", on);
+      b.setAttribute("aria-selected", on ? "true" : "false");
+    });
+  }
+  const rangeBox = document.getElementById("obsRange");
+  if (rangeBox) {
+    rangeBox.querySelectorAll(".obs-r-btn").forEach(function (b) {
+      const on = b.dataset.range === obsRange;
+      b.classList.toggle("on", on);
+      b.setAttribute("aria-pressed", on ? "true" : "false");
+    });
+  }
+  document.querySelectorAll(".obs-panel").forEach(function (p) {
+    p.classList.toggle("on", p.dataset.panel === obsTab);
+  });
+}
+
+function obsTopAgentsHtml(agents) {
+  if (!agents.length) return '<div class="obs-state">' + esc("No Agent usage in this range.") + '</div>';
+  const rows = agents.map(function (a) {
+    return {
+      name: a.agent,
+      group: a.group,
+      requests: a.requests || 0,
+      tokens: (a.tokens && a.tokens.total) || 0,
+      raw_cost: a.cost || 0,
+      cache_ratio: a.cache_read_ratio,
+      top_model: topModelOfAgent(a),
+    };
+  });
+  const sorted = dashSortRows(rows, obsAgentSort, "desc", "name");
+  const sortBtn = function (field, label) {
+    return '<button class="obs-th-btn' + (obsAgentSort === field ? " on" : "")
+      + '" type="button" data-obs-sort="' + esc(field) + '">' + esc(label) + '</button>';
+  };
+  let html = '<div class="obs-table-card"><h4>Top Agents</h4><table class="obs-table"><thead><tr>';
+  html += '<th>Agent</th>';
+  html += '<th>' + sortBtn("requests", "Requests") + '</th>';
+  html += '<th>' + sortBtn("tokens", "Tokens") + '</th>';
+  html += '<th>' + sortBtn("raw_cost", "Raw Cost") + '</th>';
+  html += '<th>Cache Ratio</th><th>Top Model</th></tr></thead><tbody>';
+  sorted.forEach(function (r) {
+    const m = r.top_model;
+    const topModel = m ? esc(m.model) + (m.variant ? " · " + esc(m.variant) : "") : "—";
+    html += '<tr>';
+    html += '<td>' + esc(dashNull(r.name)) + dashGroupBadge(r.group) + '</td>';
+    html += '<td>' + esc(formatInteger(r.requests)) + '</td>';
+    html += '<td>' + esc(formatTokens(r.tokens)) + '</td>';
+    html += '<td>' + esc(formatCost(r.raw_cost)) + '</td>';
+    html += '<td>' + esc(formatPercent(r.cache_ratio)) + '</td>';
+    html += '<td>' + topModel + '</td>';
+    html += '</tr>';
+  });
+  html += '</tbody></table></div>';
+  return html;
+}
+
+function obsTopModelsHtml(agents) {
+  const rows = topModelsFromAgents(agents);
+  if (!rows.length) return "";
+  let html = '<div class="obs-table-card"><h4>Top Models</h4><table class="obs-table"><thead><tr>';
+  html += '<th>Model</th><th>Provider</th><th>Variant</th><th>Requests</th><th>Tokens</th><th>Raw Cost</th><th>Top Agent</th>';
+  html += '</tr></thead><tbody>';
+  rows.forEach(function (r) {
+    html += '<tr>';
+    html += '<td>' + esc(dashNull(r.model)) + '</td>';
+    html += '<td>' + esc(dashNull(r.provider)) + '</td>';
+    html += '<td>' + esc(dashNull(r.variant)) + '</td>';
+    html += '<td>' + esc(formatInteger(r.requests)) + '</td>';
+    html += '<td>' + esc(formatTokens(r.tokens)) + '</td>';
+    html += '<td>' + esc(formatCost(r.raw_cost)) + '</td>';
+    html += '<td>' + esc(dashNull(r.top_agent)) + '</td>';
+    html += '</tr>';
+  });
+  html += '</tbody></table></div>';
+  return html;
+}
+
+function obsRenderOverview(panel, data) {
+  const agentsResp = (data && data.agents) || {};
+  const sessionsResp = (data && data.sessions) || {};
+  const state = readerState(agentsResp.reader);
+  if (state !== "ok") {
+    panel.innerHTML = obsStateHtml(readerMessage(state));
+    return;
+  }
+  if (sessionsResp.reader && readerState(sessionsResp.reader) !== "ok") {
+    panel.innerHTML = obsStateHtml(readerMessage(readerState(sessionsResp.reader)));
+    return;
+  }
+  const agents = agentsResp.agents || [];
+  const sessions = sessionsResp.sessions || [];
+  const summary = overviewSummary(agents, sessions);
+  const costTip = "Raw cost recorded in OpenCode message data. It is not equivalent to official OpenCode Go quota consumption.";
+  const cards = [
+    ["Requests", formatInteger(summary.requests), false],
+    ["Tokens", formatTokens(summary.tokens), false],
+    ["Raw Cost", formatCost(summary.raw_cost), true],
+    ["Cache Read Ratio", formatPercent(summary.cache_read_ratio), false],
+    ["Active Agents", formatInteger(summary.active_agents), false],
+    ["Active Models", formatInteger(summary.active_models), false],
+    ["Sessions", formatInteger(summary.sessions), false],
+  ];
+  let html = '<div class="obs-cards">';
+  cards.forEach(function (c) {
+    const title = c[2] ? ' title="' + esc(costTip) + '"' : "";
+    html += '<div class="obs-card"' + title + '><div class="ok-k">' + esc(c[0])
+      + '</div><div class="ok-v">' + esc(c[1]) + '</div></div>';
+  });
+  html += '</div>';
+  html += obsTopAgentsHtml(agents);
+  html += obsTopModelsHtml(agents);
+  panel.innerHTML = html;
+}
+
+// ---- Agents / Models / Sessions panels -------------------------------------
+
+function obsPanelBody(tab) {
+  const map = { agents: "obsAgentsView", models: "obsModelsView", sessions: "obsSessionsView" };
+  const id = map[tab];
+  return id ? document.getElementById(id) : null;
+}
+
+function obsFillProviderSelect(select, options, selected) {
+  if (!select) return selected || "";
+  const valid = {};
+  let html = '<option value="">All providers</option>';
+  const list = options || [];
+  for (let i = 0; i < list.length; i++) {
+    const o = list[i] || {};
+    valid[o.key] = true;
+    html += '<option value="' + esc(o.key) + '">' + esc(o.label) + "</option>";
+  }
+  select.innerHTML = html;
+  if (selected && valid[selected]) { select.value = selected; return selected; }
+  select.value = "";
+  return "";
+}
+
+// Re-render a loaded tab from memory only (no network).
+function obsRenderActiveView(tab) {
+  const st = obsPanels[tab];
+  if (!st || st.status !== "ok") return;
+  const body = obsPanelBody(tab);
+  if (!body) return;
+  if (tab === "agents") obsRenderAgents(body, st.data);
+  else if (tab === "models") obsRenderModels(body, st.data);
+  else if (tab === "sessions") obsRenderSessions(body, st.data);
+}
+
+function obsRenderAgents(body, data) {
+  const resp = (data && data.agents) || {};
+  const msg = dashReaderError(resp);
+  if (msg) { body.innerHTML = dashStateHtml(msg); return; }
+  const agents = resp.agents || [];
+  const provRows = [];
+  for (let i = 0; i < agents.length; i++) {
+    const ps = (agents[i] && agents[i].providers) || [];
+    for (let j = 0; j < ps.length; j++) provRows.push(ps[j]);
+  }
+  obsAgentsProvider = obsFillProviderSelect(
+    document.getElementById("obsAgentProvider"), providerOptions(provRows), obsAgentsProvider);
+  const filtered = filterAgents(filterByProvider(agents, obsAgentsProvider), obsAgentsQuery);
+  if (!filtered.length) {
+    obsAgentsRows = [];
+    body.innerHTML = dashStateHtml("No Agent usage in this range.");
+    return;
+  }
+  const norm = filtered.map(function (a) {
+    return {
+      agent: a.agent, group: a.group,
+      requests: a.requests || 0,
+      sessions: a.sessions || 0,
+      tokens: dashMetric(a.tokens) || 0,
+      raw_cost: a.cost || 0,
+      _raw: a,
+    };
+  });
+  const sorted = dashSortRows(norm, obsAgentsSort, "desc", "agent");
+  obsAgentsRows = sorted;
+  let html = '<div class="obs-split"><div class="obs-main"><div class="obs-table-card"><table class="obs-table"><thead><tr>';
+  html += "<th>Agent</th>";
+  html += "<th>" + dashSortBtn("agents", "requests", "Requests", obsAgentsSort) + "</th>";
+  html += "<th>" + dashSortBtn("agents", "tokens", "Tokens", obsAgentsSort) + "</th>";
+  html += "<th>" + dashSortBtn("agents", "raw_cost", "Raw Cost", obsAgentsSort) + "</th>";
+  html += "<th>" + dashSortBtn("agents", "sessions", "Sessions", obsAgentsSort) + "</th>";
+  html += "<th>Cache Ratio</th><th>Avg Tokens/Request</th><th>Avg Duration</th><th>Top Model</th>";
+  html += "</tr></thead><tbody>";
+  for (let i = 0; i < sorted.length; i++) {
+    const row = sorted[i];
+    const built = agentRowCells(row._raw);
+    built.cells[0].text += built.groupBadge;
+    const sel = obsAgentsSelected != null && row.agent === obsAgentsSelected ? " sel" : "";
+    html += '<tr class="obs-row-link' + sel + '" data-obs-agent-row="' + i + '">'
+      + dashCellsHtml(built.cells) + "</tr>";
+  }
+  html += "</tbody></table></div></div>";
+  html += obsAgentDrawerHtml();
+  html += "</div>";
+  body.innerHTML = html;
+}
+
+function obsAgentDrawerHtml() {
+  if (obsAgentsSelected == null) return "";
+  let raw = null;
+  for (let i = 0; i < obsAgentsRows.length; i++) {
+    if (obsAgentsRows[i].agent === obsAgentsSelected) { raw = obsAgentsRows[i]._raw; break; }
+  }
+  if (!raw) return "";
+  const d = agentDetailModel(raw);
+  let html = '<aside class="obs-drawer"><h4>' + esc(dashNull(d.agent)) + dashGroupBadge(d.group) + "</h4>";
+  html += dashMetricsHtml([
+    ["Requests", formatInteger(d.metrics.requests)],
+    ["Sessions", formatInteger(d.metrics.sessions)],
+    ["Tokens", formatTokens(d.metrics.tokens)],
+    ["Raw Cost", formatCost(d.metrics.raw_cost)],
+    ["Cache Ratio", formatPercent(d.metrics.cache_read_ratio)],
+    ["Avg Tokens/Request", formatTokens(d.metrics.avg_tokens_per_request)],
+    ["Avg Duration", formatDuration(d.metrics.avg_duration_per_request)],
+  ]);
+  html += dashDetailTable("Models",
+    ["Model", "Provider", "Variant", "Requests", "Tokens", "Raw Cost", "Request Share", "Token Share", "Cost Share"],
+    d.models.map(function (m) {
+      return [
+        dashCell(m.model), dashCell(m.provider), dashCell(m.variant),
+        dashCell(formatInteger(m.requests)), dashCell(formatTokens(m.tokens)), dashCell(formatCost(m.raw_cost)),
+        dashCell(formatPercent(m.request_share)), dashCell(formatPercent(m.token_share)), dashCell(formatPercent(m.cost_share)),
+      ];
+    }));
+  html += dashDetailTable("Providers",
+    ["Provider", "Source", "Requests", "Tokens", "Raw Cost", "Cache Ratio"],
+    d.providers.map(function (p) {
+      return [
+        dashCell(p.provider_id), dashCell(p.source),
+        dashCell(formatInteger(p.requests)), dashCell(formatTokens(p.tokens)),
+        dashCell(formatCost(p.raw_cost)), dashCell(formatPercent(p.cache_read_ratio)),
+      ];
+    }));
+  html += "</aside>";
+  return html;
+}
+
+function obsRenderModels(body, data) {
+  const resp = (data && data.models) || {};
+  const msg = dashReaderError(resp);
+  if (msg) { body.innerHTML = dashStateHtml(msg); return; }
+  const models = resp.models || [];
+  obsModelsProvider = obsFillProviderSelect(
+    document.getElementById("obsModelProvider"), providerOptions(models), obsModelsProvider);
+  const filtered = filterModels(filterByProvider(models, obsModelsProvider), obsModelsQuery);
+  if (!filtered.length) {
+    obsModelsRows = [];
+    body.innerHTML = dashStateHtml("No Model usage in this range.");
+    return;
+  }
+  const norm = filtered.map(function (m) {
+    return {
+      _key: [m.model, m.provider_id, m.source, m.variant].join("\u0001"),
+      requests: m.requests || 0,
+      sessions: m.sessions || 0,
+      tokens: dashMetric(m.tokens) || 0,
+      raw_cost: m.cost || 0,
+      _raw: m,
+    };
+  });
+  const sorted = dashSortRows(norm, obsModelsSort, "desc", "_key");
+  obsModelsRows = sorted;
+  let html = '<div class="obs-split"><div class="obs-main"><div class="obs-table-card"><table class="obs-table"><thead><tr>';
+  html += "<th>Model</th><th>Provider</th><th>Source</th><th>Variant</th>";
+  html += "<th>" + dashSortBtn("models", "requests", "Requests", obsModelsSort) + "</th>";
+  html += "<th>" + dashSortBtn("models", "tokens", "Tokens", obsModelsSort) + "</th>";
+  html += "<th>" + dashSortBtn("models", "raw_cost", "Raw Cost", obsModelsSort) + "</th>";
+  html += "<th>" + dashSortBtn("models", "sessions", "Sessions", obsModelsSort) + "</th>";
+  html += "<th>Cache Ratio</th><th>Top Agent</th>";
+  html += "</tr></thead><tbody>";
+  for (let i = 0; i < sorted.length; i++) {
+    const row = sorted[i];
+    const built = modelRowCells(row._raw);
+    const sel = obsModelsSelected != null && row._key === obsModelsSelected ? " sel" : "";
+    html += '<tr class="obs-row-link' + sel + '" data-obs-model-row="' + i + '">'
+      + dashCellsHtml(built.cells) + "</tr>";
+  }
+  html += "</tbody></table></div></div>";
+  html += obsModelDrawerHtml();
+  html += "</div>";
+  body.innerHTML = html;
+}
+
+function obsModelDrawerHtml() {
+  if (obsModelsSelected == null) return "";
+  let raw = null;
+  for (let i = 0; i < obsModelsRows.length; i++) {
+    if (obsModelsRows[i]._key === obsModelsSelected) { raw = obsModelsRows[i]._raw; break; }
+  }
+  if (!raw) return "";
+  const d = modelDetailModel(raw);
+  let html = '<aside class="obs-drawer"><h4>' + esc(dashNull(d.model)) + "</h4>";
+  html += dashMetricsHtml([
+    ["Provider", dashNull(d.provider_id)],
+    ["Source", dashNull(d.source)],
+    ["Variant", dashNull(d.variant)],
+    ["Requests", formatInteger(d.metrics.requests)],
+    ["Sessions", formatInteger(d.metrics.sessions)],
+    ["Tokens", formatTokens(d.metrics.tokens)],
+    ["Raw Cost", formatCost(d.metrics.raw_cost)],
+    ["Cache Ratio", formatPercent(d.metrics.cache_read_ratio)],
+  ]);
+  html += dashDetailTable("Agents",
+    ["Agent", "Group", "Requests", "Tokens", "Raw Cost", "Cache Ratio"],
+    d.agents.map(function (x) {
+      return [
+        dashCell(x.agent), dashCell(x.group),
+        dashCell(formatInteger(x.requests)), dashCell(formatTokens(x.tokens)),
+        dashCell(formatCost(x.raw_cost)), dashCell(formatPercent(x.cache_read_ratio)),
+      ];
+    }));
+  html += "</aside>";
+  return html;
+}
+
+function obsRenderSessions(body, data) {
+  const resp = (data && data.sessions) || {};
+  const msg = dashReaderError(resp);
+  if (msg) { body.innerHTML = dashStateHtml(msg); return; }
+  const sessions = resp.sessions || [];
+  const tree = resp.tree || null;
+  obsSessionsData = sessions;
+  obsSessionsTree = tree;
+  const nodes = (tree && tree.nodes) || [];
+  if (!nodes.length) {
+    obsSessionsRows = [];
+    body.innerHTML = dashStateHtml("No Session usage in this range.");
+    return;
+  }
+  if (obsSessionsExpanded == null) {
+    // DEFAULT: roots expanded, deeper levels collapsed.
+    obsSessionsExpanded = new Set();
+    for (let i = 0; i < nodes.length; i++) {
+      const n = nodes[i] || {};
+      if (n.session_id == null) continue;
+      const parentless = n.parent_session_id == null || n.parent_session_id === n.session_id;
+      if (n.is_root === true || parentless) obsSessionsExpanded.add(String(n.session_id));
+    }
+  }
+  const rows = sessionTreeRows(sessions, tree, obsSessionsExpanded);
+  obsSessionsRows = rows;
+  if (!rows.length) { body.innerHTML = dashStateHtml("No Session usage in this range."); return; }
+  let html = '<div class="obs-split"><div class="obs-main"><div class="obs-table-card"><table class="obs-table"><thead><tr>';
+  html += "<th>Session ID</th><th>Depth</th><th>Requests</th><th>Tokens</th><th>Raw Cost</th><th>Agents</th><th>Children</th>";
+  html += "</tr></thead><tbody>";
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    const cells = sessionRowCells(row).cells;
+    const toggle = row.has_children
+      ? '<span class="obs-tree-toggle" data-obs-session-toggle="' + i + '">' + (row.expanded ? "−" : "+") + "</span>"
+      : '<span class="obs-tree-toggle leaf">·</span>';
+    const indent = '<span class="obs-indent" style="width:' + (Math.max(0, row.depth || 0) * 14) + 'px"></span>';
+    cells[0].text = toggle + indent + cells[0].text;
+    const sel = obsSelectedSession != null && row.session_id === obsSelectedSession ? " sel" : "";
+    html += '<tr class="obs-row-link' + sel + '" data-obs-session-row="' + i + '">'
+      + dashCellsHtml(cells) + "</tr>";
+  }
+  html += "</tbody></table></div></div>";
+  html += obsSessionDrawerHtml();
+  html += "</div>";
+  body.innerHTML = html;
+}
+
+function obsSessionDrawerHtml() {
+  if (obsSelectedSession == null) return "";
+  let row = null;
+  for (let i = 0; i < obsSessionsRows.length; i++) {
+    if (obsSessionsRows[i].session_id === obsSelectedSession) { row = obsSessionsRows[i]; break; }
+  }
+  if (!row) return "";
+  let s = null;
+  for (let i = 0; i < obsSessionsData.length; i++) {
+    if (obsSessionsData[i].session_id === obsSelectedSession) { s = obsSessionsData[i]; break; }
+  }
+  const d = sessionDetailModel(s);
+  let html = '<aside class="obs-drawer"><h4>Session</h4>';
+  html += dashMetricsHtml([
+    ["Session ID", dashNull(d.session_id)],
+    ["Parent Session ID", dashNull(d.parent_session_id)],
+    ["Depth", formatInteger(row.depth)],
+    ["Start", formatDateTime(d.start_ts)],
+    ["End", formatDateTime(d.end_ts)],
+    ["Duration", formatDuration(d.duration_ms)],
+    ["Requests", formatInteger(d.requests)],
+    ["Tokens", formatTokens(d.tokens)],
+    ["Raw Cost", formatCost(d.raw_cost)],
+  ]);
+  html += dashDetailTable("Agents", ["Agent", "Group", "Requests", "Tokens", "Raw Cost"],
+    d.agents.map(function (x) {
+      return [dashCell(x.agent), dashCell(x.group), dashCell(formatInteger(x.requests)),
+        dashCell(formatTokens(x.tokens)), dashCell(formatCost(x.raw_cost))];
+    }));
+  html += dashDetailTable("Models", ["Model", "Provider", "Variant", "Requests", "Tokens", "Raw Cost"],
+    d.models.map(function (x) {
+      return [dashCell(x.model), dashCell(x.provider_id), dashCell(x.variant),
+        dashCell(formatInteger(x.requests)), dashCell(formatTokens(x.tokens)), dashCell(formatCost(x.raw_cost))];
+    }));
+  html += dashDetailTable("Providers", ["Provider", "Source", "Requests", "Tokens", "Raw Cost"],
+    d.providers.map(function (x) {
+      return [dashCell(x.provider_id), dashCell(x.source), dashCell(formatInteger(x.requests)),
+        dashCell(formatTokens(x.tokens)), dashCell(formatCost(x.raw_cost))];
+    }));
+  html += "</aside>";
+  return html;
+}
+
+function obsSelectAgent(i) {
+  const r = obsAgentsRows[i];
+  obsAgentsSelected = r ? r.agent : null;
+  obsRenderActiveView("agents");
+}
+
+function obsSelectModel(i) {
+  const r = obsModelsRows[i];
+  obsModelsSelected = r ? r._key : null;
+  obsRenderActiveView("models");
+}
+
+function obsSelectSession(i) {
+  const r = obsSessionsRows[i];
+  obsSelectedSession = r ? r.session_id : null;
+  obsRenderActiveView("sessions");
+}
+
+function obsToggleSession(i) {
+  const r = obsSessionsRows[i];
+  if (!r || !r.has_children) return;
+  if (!obsSessionsExpanded) obsSessionsExpanded = new Set();
+  const id = r.session_id;
+  if (obsSessionsExpanded.has(id)) obsSessionsExpanded.delete(id);
+  else obsSessionsExpanded.add(id);
+  obsRenderActiveView("sessions");
+}
+
+function obsExpandAllSessions() {
+  const nodes = (obsSessionsTree && obsSessionsTree.nodes) || [];
+  obsSessionsExpanded = new Set();
+  for (let i = 0; i < nodes.length; i++) {
+    const n = nodes[i] || {};
+    if (n.session_id != null) obsSessionsExpanded.add(String(n.session_id));
+  }
+  obsRenderActiveView("sessions");
+}
+
+function obsCollapseAllSessions() {
+  obsSessionsExpanded = new Set();
+  obsRenderActiveView("sessions");
+}
+
+const OBS_TAB_LABELS = { agents: "Agent", models: "Model", sessions: "Session" };
+
+function obsRenderTab(tab) {
+  tab = DASH_TABS.indexOf(tab) >= 0 ? tab : "overview";
+  const panel = document.querySelector('.obs-panel[data-panel="' + tab + '"]');
+  if (!panel) return;
+  const st = obsPanels[tab] || { status: "idle" };
+  if (tab === "overview") {
+    if (st.status === "loading") { panel.innerHTML = obsStateHtml("Loading…"); return; }
+    if (st.status === "error") { panel.innerHTML = obsErrorHtml("Failed to load Agent usage.", tab); return; }
+    if (st.status !== "ok") { panel.innerHTML = ""; return; }
+    obsRenderOverview(panel, st.data);
+    return;
+  }
+  const body = obsPanelBody(tab);
+  if (!body) return;
+  if (st.status === "loading") { body.innerHTML = dashStateHtml("Loading…"); return; }
+  if (st.status === "error") {
+    body.innerHTML = dashErrorHtml("Failed to load " + OBS_TAB_LABELS[tab] + " usage.", tab);
+    return;
+  }
+  if (st.status !== "ok") { body.innerHTML = ""; return; }
+  if (tab === "agents") obsRenderAgents(body, st.data);
+  else if (tab === "models") obsRenderModels(body, st.data);
+  else if (tab === "sessions") obsRenderSessions(body, st.data);
+}
+
+async function obsEnsure(tab, force) {
+  tab = DASH_TABS.indexOf(tab) >= 0 ? tab : "overview";
+  const key = dashCacheKey(tab, obsRange);
+  if (!force && dashCache[key]) {
+    obsPanels[tab] = { status: "ok", data: dashCache[key] };
+    obsRenderTab(tab);
+    return;
+  }
+  obsPanels[tab] = { status: "loading" };
+  obsRenderTab(tab);
+  try {
+    const res = await dashLoad(tab, obsRange, dashCache, obsApi, { force: !!force });
+    if (res.key !== dashCacheKey(tab, obsRange)) return; // range 已变化, 丢弃过期结果
+    obsPanels[tab] = { status: "ok", data: res.data };
+    // New data resets per-panel view state (default expansion, no selection).
+    if (tab === "sessions") { obsSessionsExpanded = null; obsSelectedSession = null; }
+    else if (tab === "agents") obsAgentsSelected = null;
+    else if (tab === "models") obsModelsSelected = null;
+  } catch (e) {
+    obsPanels[tab] = { status: "error" };
+  }
+  obsRenderTab(tab);
+}
+
+function obsSelectTab(tab) {
+  if (DASH_TABS.indexOf(tab) < 0) return;
+  obsTab = tab;
+  obsSetActiveUI();
+  obsEnsure(tab);
+}
+
+function obsSelectRange(range) {
+  obsRange = dashRangeValue(range);
+  obsSetActiveUI();
+  obsEnsure(obsTab);
+}
+
+(function initObs() {
+  const tabsBox = document.getElementById("obsTabs");
+  if (tabsBox) {
+    tabsBox.addEventListener("click", function (e) {
+      const b = e.target.closest(".obs-tab");
+      if (b) obsSelectTab(b.dataset.tab);
+    });
+  }
+  const rangeBox = document.getElementById("obsRange");
+  if (rangeBox) {
+    rangeBox.addEventListener("click", function (e) {
+      const b = e.target.closest(".obs-r-btn");
+      if (b) obsSelectRange(b.dataset.range);
+    });
+  }
+  document.addEventListener("click", function (e) {
+    if (!e.target.closest) return;
+    const expandAll = e.target.closest("[data-obs-expand]");
+    if (expandAll) { obsExpandAllSessions(); return; }
+    const collapseAll = e.target.closest("[data-obs-collapse]");
+    if (collapseAll) { obsCollapseAllSessions(); return; }
+    const toggle = e.target.closest("[data-obs-session-toggle]");
+    if (toggle) {
+      e.stopPropagation();
+      obsToggleSession(parseInt(toggle.dataset.obsSessionToggle, 10));
+      return;
+    }
+    const sessionRow = e.target.closest("[data-obs-session-row]");
+    if (sessionRow) { obsSelectSession(parseInt(sessionRow.dataset.obsSessionRow, 10)); return; }
+    const agentRow = e.target.closest("[data-obs-agent-row]");
+    if (agentRow) { obsSelectAgent(parseInt(agentRow.dataset.obsAgentRow, 10)); return; }
+    const modelRow = e.target.closest("[data-obs-model-row]");
+    if (modelRow) { obsSelectModel(parseInt(modelRow.dataset.obsModelRow, 10)); return; }
+    const sort = e.target.closest("[data-obs-sort]");
+    if (sort) {
+      const tab = sort.dataset.obsTab || "overview";
+      if (tab === "agents") { obsAgentsSort = sort.dataset.obsSort; obsRenderActiveView("agents"); }
+      else if (tab === "models") { obsModelsSort = sort.dataset.obsSort; obsRenderActiveView("models"); }
+      else {
+        obsAgentSort = sort.dataset.obsSort;
+        if (obsPanels.overview && obsPanels.overview.status === "ok") {
+          obsRenderOverview(document.querySelector('.obs-panel[data-panel="overview"]'), obsPanels.overview.data);
+        }
+      }
+      return;
+    }
+    const retry = e.target.closest("[data-obs-retry]");
+    if (retry) obsEnsure(retry.dataset.obsRetry, true);
+  });
+  document.addEventListener("input", function (e) {
+    if (!e.target) return;
+    if (e.target.id === "obsAgentSearch") { obsAgentsQuery = e.target.value; obsRenderActiveView("agents"); }
+    else if (e.target.id === "obsModelSearch") { obsModelsQuery = e.target.value; obsRenderActiveView("models"); }
+  });
+  document.addEventListener("change", function (e) {
+    if (!e.target) return;
+    if (e.target.id === "obsAgentProvider") { obsAgentsProvider = e.target.value; obsRenderActiveView("agents"); }
+    else if (e.target.id === "obsModelProvider") { obsModelsProvider = e.target.value; obsRenderActiveView("models"); }
+  });
+  obsSetActiveUI();
+})();
+
 async function refresh() {
   try {
     const data = await window.widgetAPI.apiGetState();
@@ -1481,6 +2924,8 @@ async function refresh() {
     }
     await Promise.all([...needed].map(id => fetchView(id)));
     render();
+    // Phase 5A: 既有刷新控件仅刷新当前可观测性 tab + range (force), 不扇形刷新其它 tab
+    if (uiState === "large") obsEnsure(obsTab, true);
   } catch (e) {
     $("#keyDot").className = "dot err"; $("#keyText").textContent = "后端未连接";
   }
@@ -1501,6 +2946,10 @@ function setUiState(v, noResize, manual) {
   $("#smallView").classList.toggle("on", v === "small");
   $("#compactView").style.display = v === "mid" ? "flex" : "none";
   $("#dashView").classList.toggle("on", onLarge);
+  // Phase 5A: 可观测性仪表盘仅在 large 显示; 首次显示只懒加载当前 tab
+  const obsRoot = document.getElementById("obsDashboard");
+  if (obsRoot) obsRoot.classList.toggle("on", onLarge);
+  if (onLarge) obsEnsure(obsTab);
   if (!noResize) {
     window.widgetAPI.resize(v === "small" ? "small" : (onLarge ? "large" : "mid"));
   }
