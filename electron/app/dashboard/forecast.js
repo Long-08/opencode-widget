@@ -287,11 +287,171 @@ function obsRenderForecast(body, data) {
   body.innerHTML = forecastHtml(resp);
 }
 
+// ---- notification settings (Phase 6B continuation) -------------------------
+// The bridge is resolved lazily inside the DOM-side callbacks below, never at
+// load; forecast data still loads only through the core orchestration.
+
+function forecastBridge() {
+  try {
+    if (typeof window === "undefined" || !window) return null;
+    return window.widgetAPI || null;
+  } catch (_) {
+    return null;
+  }
+}
+
+// Pure + fully escaped: every dynamic value passes through esc(). No raw
+// exception / error strings are ever rendered.
+function forecastNotificationFieldsHtml(settings) {
+  const s = settings && typeof settings === "object" ? settings : {};
+  const qh = s.quiet_hours && typeof s.quiet_hours === "object" ? s.quiet_hours : {};
+  const enabled = s.enabled === true;
+  const qhEnabled = qh.enabled === true;
+  const start = typeof qh.start === "string" ? qh.start : "23:00";
+  const end = typeof qh.end === "string" ? qh.end : "08:00";
+  let html = '<label class="forecast-notify-row"><input type="checkbox" id="notifyEnabled"'
+    + (enabled ? " checked" : "") + "> " + esc("Enable forecast notifications") + "</label>";
+  html += '<label class="forecast-notify-row"><input type="checkbox" id="notifyQuietEnabled"'
+    + (qhEnabled ? " checked" : "") + "> " + esc("Quiet hours") + "</label>";
+  html += '<div class="forecast-notify-row"><label for="notifyQuietStart">' + esc("Start")
+    + '</label><input type="time" id="notifyQuietStart" value="' + esc(start) + '">'
+    + '<label for="notifyQuietEnd">' + esc("End")
+    + '</label><input type="time" id="notifyQuietEnd" value="' + esc(end) + '"></div>';
+  html += '<div class="forecast-notify-row"><button type="button" id="notifySave">' + esc("Save")
+    + '</button><span class="forecast-notify-msg" id="notifyMsg" role="status"></span></div>';
+  return html;
+}
+
+function forecastNotificationBlockHtml() {
+  return '<div class="obs-table-card forecast-notify" id="forecastNotify">'
+    + "<h4>" + esc("Notification Settings") + "</h4>"
+    + '<div class="forecast-notify-loading" id="notifyLoading">' + esc("Loading…") + "</div>"
+    + "</div>";
+}
+
+function setForecastNotifyMessage(box, text, isError) {
+  if (!box || typeof box.querySelector !== "function") return;
+  const msg = box.querySelector("#notifyMsg");
+  if (!msg) return;
+  // Fixed, literal messages only: never a raw exception string.
+  msg.textContent = String(text);
+  msg.classList.toggle("err", !!isError);
+}
+
+function renderForecastNotificationSettings(box, settings) {
+  if (!box) return;
+  box.innerHTML = "<h4>" + esc("Notification Settings") + "</h4>"
+    + forecastNotificationFieldsHtml(settings);
+  const save = typeof box.querySelector === "function" ? box.querySelector("#notifySave") : null;
+  if (save && typeof save.addEventListener === "function") {
+    save.addEventListener("click", function () { saveForecastNotificationSettings(box); });
+  }
+}
+
+function forecastNotificationPatch(box) {
+  const pick = function (sel) {
+    try {
+      return box && typeof box.querySelector === "function" ? box.querySelector(sel) : null;
+    } catch (_) { return null; }
+  };
+  const enabledEl = pick("#notifyEnabled");
+  const quietEl = pick("#notifyQuietEnabled");
+  const startEl = pick("#notifyQuietStart");
+  const endEl = pick("#notifyQuietEnd");
+  return {
+    enabled: !!(enabledEl && enabledEl.checked),
+    quiet_hours: {
+      enabled: !!(quietEl && quietEl.checked),
+      start: startEl ? String(startEl.value) : "23:00",
+      end: endEl ? String(endEl.value) : "08:00",
+    },
+  };
+}
+
+function saveForecastNotificationSettings(box) {
+  const bridge = forecastBridge();
+  if (!bridge || typeof bridge.apiSetNotificationSettings !== "function") {
+    setForecastNotifyMessage(box, "Notification settings unavailable.", true);
+    return;
+  }
+  let patch = null;
+  try { patch = forecastNotificationPatch(box); } catch (_) { patch = null; }
+  if (!patch) {
+    setForecastNotifyMessage(box, "Could not save notification settings.", true);
+    return;
+  }
+  bridge.apiSetNotificationSettings(patch).then(function (res) {
+    if (res && res.ok) setForecastNotifyMessage(box, "Saved.", false);
+    else setForecastNotifyMessage(box, "Could not save notification settings.", true);
+  }).catch(function () {
+    setForecastNotifyMessage(box, "Could not save notification settings.", true);
+  });
+}
+
+// Append + hydrate the settings block for the Forecast tab. No-op without a
+// bridge (e.g. in node:test), so the module stays load-safe off-DOM.
+function mountForecastNotificationSettings(body) {
+  if (!body || typeof document === "undefined") return;
+  if (typeof body.insertAdjacentHTML !== "function" || typeof body.querySelector !== "function") return;
+  const bridge = forecastBridge();
+  if (!bridge || typeof bridge.apiGetNotificationSettings !== "function") return;
+  let box = null;
+  try {
+    const existing = body.querySelector("#forecastNotify");
+    if (existing && existing.parentNode) existing.parentNode.removeChild(existing);
+    body.insertAdjacentHTML("beforeend", forecastNotificationBlockHtml());
+    box = body.querySelector("#forecastNotify");
+  } catch (_) { return; }
+  if (!box) return;
+  bridge.apiGetNotificationSettings().then(function (settings) {
+    renderForecastNotificationSettings(box, settings);
+  }).catch(function () {
+    renderForecastNotificationSettings(box, null);
+    setForecastNotifyMessage(box, "Could not load notification settings.", true);
+  });
+}
+
+// Notification click -> large mode + forecast tab. Tray refresh -> the existing
+// refresh() path plus a forced reload of only the active tab (no fan-out).
+function wireForecastNotificationActions() {
+  const bridge = forecastBridge();
+  if (!bridge) return;
+  if (typeof bridge.onOpenForecast === "function") {
+    try {
+      bridge.onOpenForecast(function () {
+        if (typeof setUiState === "function") {
+          try { setUiState("large"); } catch (_) { /* ignore */ }
+        }
+        if (typeof OCW !== "undefined" && OCW && typeof OCW.obsSelectTab === "function") {
+          try { OCW.obsSelectTab("forecast"); } catch (_) { /* ignore */ }
+        }
+      });
+    } catch (_) { /* ignore */ }
+  }
+  if (typeof bridge.onTrayRefresh === "function") {
+    try {
+      bridge.onTrayRefresh(function () {
+        if (typeof refresh === "function") {
+          try { refresh(); } catch (_) { /* ignore */ }
+        }
+        if (typeof OCW !== "undefined" && OCW
+          && typeof OCW.obsEnsure === "function" && typeof OCW.getActiveTab === "function") {
+          try { OCW.obsEnsure(OCW.getActiveTab(), true); } catch (_) { /* ignore */ }
+        }
+      });
+    } catch (_) { /* ignore */ }
+  }
+}
+
 // No API call at load: registration only wires the renderer into core.js.
 if (typeof OCW !== "undefined" && OCW && typeof OCW.registerTab === "function") {
   OCW.registerTab("forecast", {
     target: function () { return document.getElementById("obsForecastView"); },
-    render: function (body, data) { obsRenderForecast(body, data); },
+    render: function (body, data) {
+      obsRenderForecast(body, data);
+      mountForecastNotificationSettings(body);
+    },
     reset: function () {},
   });
+  wireForecastNotificationActions();
 }
