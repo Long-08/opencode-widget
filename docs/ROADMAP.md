@@ -10,9 +10,10 @@
 | 2 Core | Security hardening + current-schema reader + raw Agent backend | **COMPLETE** |
 | 2.1 | Runtime-token boundary + secret-storage semantics + Agent cost semantics | **COMPLETE** |
 | 2D | Oh My OpenCode Slim integration | **CANCELLED** — Slim is no longer installed |
-| 3 | Agent Observability Backend | **IN PROGRESS** |
+| 3 | Agent Observability Backend | **COMPLETE** |
 | 4 | Forecasting | PLANNED |
-| 5 | Dashboard UI | PLANNED |
+| 5A | Observability Dashboard UI | **COMPLETE** |
+| 5B | Advanced visualization (charts) | PLANNED |
 | 6 | Desktop UX & Hygiene | PLANNED |
 
 ## Permanent constraints
@@ -31,7 +32,7 @@
 5. **Billing/quota/meter logic is out of scope** for observability work and must not change.
 6. **No subjective scoring** (performance/quality/efficiency/ranking scores) is ever added.
 
-## Phase 3 — Agent Observability Backend (IN PROGRESS)
+## Phase 3 — Agent Observability Backend (COMPLETE)
 
 Plugin-independent aggregation over normalized OpenCode usage records:
 
@@ -57,16 +58,15 @@ Planned only (no production code in Phase 3):
 - remaining quota estimate
 - time-to-limit
 
-## Phase 5 — Dashboard UI (PLANNED, not implemented)
+## Phase 5 — Dashboard UI
 
-Planned screens only (no UI work in Phase 3):
+**Phase 5A — Observability Dashboard — COMPLETE.** Large-screen tabs Overview / Agents /
+Models / Sessions with shared range state, lazy per-tab loading, in-memory cache, agent/model
+detail panels, session tree, explicit Raw Cost semantics, and reader/empty/error states.
+See `docs/PHASE5_DASHBOARD_UI.md`.
 
-- Overview
-- Agents
-- Models
-- Providers
-- Sessions
-- Forecast
+**Phase 5B (PLANNED):** advanced visualization (charts in Agent/Model detail) and a Forecast
+screen once Phase 4 exists. Providers remains a filter/detail dimension, not a standalone tab.
 
 ## Phase 6 — Desktop UX & Hygiene (PLANNED, not implemented)
 
