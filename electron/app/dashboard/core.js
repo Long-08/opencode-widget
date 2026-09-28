@@ -9,13 +9,14 @@
    DOM-free shared dashboard core (Phase 5A). Pure display/sort/fetch helpers;
    no business metrics are recomputed here. Extractable for node:test.
    The only front-end aggregate is summing API-provided Overview numbers. */
-const DASH_TABS = ['overview', 'agents', 'models', 'sessions'];
+const DASH_TABS = ['overview', 'agents', 'models', 'sessions', 'forecast'];
 const DASH_RANGES = ['today', '7d', '30d', 'all'];
 const DASH_ENDPOINTS = {
   overview: ['agents', 'sessions'],
   agents: ['agents'],
   models: ['models'],
   sessions: ['sessions'],
+  forecast: ['forecast'],
 };
 
 // 规范化 range: 仅接受 DASH_RANGES, 其余回退 'all' (与后端 OBS_RANGES 对齐)
@@ -24,6 +25,8 @@ function dashRangeValue(r) {
 }
 
 function dashCacheKey(tab, range) {
+  // Forecast is range-independent: a single cache entry regardless of range.
+  if (tab === 'forecast') return 'forecast';
   return tab + '|' + dashRangeValue(range);
 }
 
@@ -242,6 +245,8 @@ function obsApi(name, range) {
   if (name === "agents") return window.widgetAPI.apiGetAgents(r);
   if (name === "models") return window.widgetAPI.apiGetModels(r);
   if (name === "sessions") return window.widgetAPI.apiGetSessions(r);
+  // Forecast is range-independent: the bridge method takes no argument.
+  if (name === "forecast") return window.widgetAPI.apiGetForecast();
   return Promise.reject(new Error("unknown endpoint"));
 }
 
@@ -254,10 +259,18 @@ OCW.obsSetActiveUI = function () {
       b.setAttribute("aria-selected", on ? "true" : "false");
     });
   }
+  // Forecast is range-independent: hide/disable the range control on that tab
+  // and restore it for every other tab. OCW.state.range is never mutated here,
+  // so e.g. Agents @ 7d -> Forecast -> Agents stays @ 7d.
   const rangeBox = document.getElementById("obsRange");
   if (rangeBox) {
+    const rangeHidden = OCW.state.tab === "forecast";
+    rangeBox.style.display = rangeHidden ? "none" : "";
+    rangeBox.classList.toggle("obs-range-hidden", rangeHidden);
+    rangeBox.setAttribute("aria-hidden", rangeHidden ? "true" : "false");
     rangeBox.querySelectorAll(".obs-r-btn").forEach(function (b) {
-      const on = b.dataset.range === OCW.state.range;
+      b.disabled = rangeHidden;
+      const on = !rangeHidden && b.dataset.range === OCW.state.range;
       b.classList.toggle("on", on);
       b.setAttribute("aria-pressed", on ? "true" : "false");
     });
@@ -282,7 +295,7 @@ OCW.obsRenderActiveView = function (tab) {
   desc.render(body, st.data);
 };
 
-const OBS_TAB_LABELS = { agents: "Agent", models: "Model", sessions: "Session" };
+const OBS_TAB_LABELS = { agents: "Agent", models: "Model", sessions: "Session", forecast: "Forecast" };
 
 OCW.obsRenderTab = function (tab) {
   tab = DASH_TABS.indexOf(tab) >= 0 ? tab : "overview";

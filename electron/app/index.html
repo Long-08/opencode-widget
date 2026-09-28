@@ -137,6 +137,7 @@
             <button class="obs-tab" type="button" role="tab" data-tab="agents" aria-label="Agents" aria-selected="false">Agents</button>
             <button class="obs-tab" type="button" role="tab" data-tab="models" aria-label="Models" aria-selected="false">Models</button>
             <button class="obs-tab" type="button" role="tab" data-tab="sessions" aria-label="Sessions" aria-selected="false">Sessions</button>
+            <button class="obs-tab" type="button" role="tab" data-tab="forecast" aria-label="Forecast" aria-selected="false">Forecast</button>
           </div>
           <div class="obs-range" id="obsRange" role="group" aria-label="Time range">
             <button class="obs-r-btn on" type="button" data-range="today" aria-label="Today" aria-pressed="true">Today</button>
@@ -167,6 +168,9 @@
               <button class="obs-btn" type="button" data-obs-collapse="all">Collapse all</button>
             </div>
             <div class="obs-view" id="obsSessionsView"></div>
+          </section>
+          <section class="obs-panel" data-panel="forecast" aria-label="Forecast panel">
+            <div class="obs-view" id="obsForecastView"></div>
           </section>
         </div>
       </section>
@@ -230,6 +234,7 @@
 <script src="dashboard/agents.js"></script>
 <script src="dashboard/models.js"></script>
 <script src="dashboard/sessions.js"></script>
+<script src="dashboard/forecast.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

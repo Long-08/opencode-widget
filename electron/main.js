@@ -284,6 +284,8 @@ function resolveApiTarget(req) {
   const p = typeof req.path === 'string' ? req.path : '';
   if (method === 'GET') {
     if (p === '/api/state' || p === '/api/config' || p === '/api/views') return { method, path: p, body: null };
+    // Forecast: bare path only (range-independent, no query accepted).
+    if (p === '/api/forecast') return { method, path: p, body: null };
     if (p === '/api/formula' || p === '/api/formula?refresh=1') return { method, path: p, body: null };
     if (p === '/api/agents' || p === '/api/models' || p === '/api/providers' || p === '/api/sessions') {
       return { method, path: p, body: null };

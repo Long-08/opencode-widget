@@ -24,6 +24,7 @@ contextBridge.exposeInMainWorld('widgetAPI', {
   apiGetModels: (range) => apiCall('GET', range ? '/api/models?range=' + range : '/api/models'),
   apiGetProviders: (range) => apiCall('GET', range ? '/api/providers?range=' + range : '/api/providers'),
   apiGetSessions: (range) => apiCall('GET', range ? '/api/sessions?range=' + range : '/api/sessions'),
+  apiGetForecast: () => apiCall('GET', '/api/forecast'),
   apiPostKey: (key) => apiCall('POST', '/api/key', { key }),
   apiPostServer: (authCookie, workspaceId) => apiCall('POST', '/api/server', { auth_cookie: authCookie, workspace_id: workspaceId }),
   apiPostCalibrate: (cal) => apiCall('POST', '/api/calibrate', cal),
