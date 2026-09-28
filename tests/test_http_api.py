@@ -67,7 +67,10 @@ def test_formula_endpoint(api_server, api_token, data_server, fixtures_dir):
         api_server + "/api/formula", headers=helpers.auth_headers(api_token)
     )
     assert status == 200
-    assert data["version"] == 999
+    # Phase 7: the fixture version was moved from 999 into the supported
+    # window (MAX_SUPPORTED_FORMULA_VERSION=7), so out-of-window payloads are
+    # no longer silently adopted. Assertions track the fixture contract.
+    assert data["version"] == 6
     assert data["source"] == "cloud"
 
 
@@ -77,7 +80,7 @@ def test_views_endpoint(api_server, api_token, data_server, fixtures_dir):
         api_server + "/api/views", headers=helpers.auth_headers(api_token)
     )
     assert status == 200
-    assert data["version"] == 999
+    assert data["version"] == 6
     assert "all_today" in [v["id"] for v in data["views"]]
 
 

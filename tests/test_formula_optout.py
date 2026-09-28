@@ -52,7 +52,7 @@ def test_enabled_file_hash_and_meta(tmp_path, fixtures_dir):
     )
     store = views.FormulaStore(url=str(path))
     f = store.get()
-    assert f["version"] == 999
+    assert f["version"] == 6
 
     # hash the exact string _fetch returns (file is ASCII/LF so == file bytes)
     raw = path.read_text(encoding="utf-8")
@@ -60,7 +60,7 @@ def test_enabled_file_hash_and_meta(tmp_path, fixtures_dir):
     assert meta["hash"] == hashlib.sha256(raw.encode("utf-8")).hexdigest()
     assert meta["fallback"] is False
     assert meta["enabled"] is True
-    assert meta["version"] == 999
+    assert meta["version"] == 6
     assert meta["last_updated"] == meta["fetched_at"]
 
 
@@ -146,5 +146,5 @@ def test_api_formula_enabled_fields(api_server, api_token, data_server, fixtures
     assert data["fallback"] is False
     raw = open(url, "r", encoding="utf-8").read()
     assert data["hash"] == hashlib.sha256(raw.encode("utf-8")).hexdigest()
-    assert data["version"] == 999
+    assert data["version"] == 6
     assert data["last_updated"] == data["fetched_at"]

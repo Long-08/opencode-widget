@@ -200,7 +200,20 @@ def _idle_watchdog_loop():
             pass
 
 
-_FORMULA_STORE = vw.FormulaStore(url="")
+def _formula_cache_path():
+    """Path for the persisted last-known-good formula (Phase 7).
+
+    ``paths.formula_cache_path()`` is provided by a parallel lane. Called
+    defensively so the widget still works (and never crashes) without it.
+    """
+    try:
+        import paths
+        return paths.formula_cache_path()
+    except Exception:
+        return os.path.join(APP_DIR, "formula_lkg.json")
+
+
+_FORMULA_STORE = vw.FormulaStore(url="", cache_path=_formula_cache_path())
 _FORMULA_ENGINE = None
 _FORMULA_LOCK = threading.Lock()
 
@@ -291,7 +304,8 @@ def get_formula(force=False):
     url = _formula_url()
     enabled = _formula_enabled()
     if _FORMULA_STORE.url != vw.resolve_formula_url(url) or _FORMULA_STORE.enabled != enabled:
-        _FORMULA_STORE = vw.FormulaStore(url=url, enabled=enabled)
+        _FORMULA_STORE = vw.FormulaStore(url=url, enabled=enabled,
+                                         cache_path=_formula_cache_path())
     f = _FORMULA_STORE.get(force=force)
     apply_params_to_gw(f)
     fr.apply_formulas(f.get("formulas") if isinstance(f, dict) else None)
@@ -1106,6 +1120,12 @@ class Handler(BaseHTTPRequestHandler):
                 "hash": meta.get("hash"),
                 "last_updated": meta.get("last_updated", meta.get("fetched_at")),
                 "fallback": meta.get("fallback", False),
+                # Phase 7: trust-boundary provenance (additive keys)
+                "schema_version": meta.get("schema_version"),
+                "formula_version": meta.get("formula_version", f.get("version")),
+                "loaded_at": meta.get("loaded_at", 0),
+                "validation_status": meta.get("validation_status"),
+                "integrity_status": meta.get("integrity_status", "unsigned"),
                 "params": f.get("params"),
                 "views": f.get("views"),
                 "constants": f.get("constants"),

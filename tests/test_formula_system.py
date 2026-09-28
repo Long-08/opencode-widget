@@ -25,21 +25,23 @@ def test_formula_store_cloud_roundtrip_and_cache(tmp_path, fixtures_dir):
 
     store = views.FormulaStore(url=str(path))
     f = store.get()
-    assert f["version"] == 999
+    assert f["version"] == 6
     assert store.meta()["source"] == "cloud"
     assert store.meta()["error"] is None
 
     # second get() without force stays cached
-    assert store.get()["version"] == 999
+    assert store.get()["version"] == 6
 
     # rewriting the file does not affect the cached read ...
     changed = json.loads(path.read_text(encoding="utf-8"))
-    changed["version"] = 1000
+    # 7 is the top of the supported version window (MIN..MAX); Phase 7 rejects
+    # out-of-window versions, so use an in-window value to prove force refresh.
+    changed["version"] = 7
     path.write_text(json.dumps(changed), encoding="utf-8")
-    assert store.get()["version"] == 999
+    assert store.get()["version"] == 6
 
     # ... until an explicit force refresh picks up the new version
-    assert store.get(force=True)["version"] == 1000
+    assert store.get(force=True)["version"] == 7
     assert store.meta()["error"] is None
 
 
@@ -68,13 +70,13 @@ def test_formula_store_keeps_last_formula_on_refresh_failure(tmp_path, fixtures_
     path = tmp_path / "formula.json"
     shutil.copyfile(os.path.join(fixtures_dir, "formula_valid.json"), path)
     store = views.FormulaStore(url=str(path))
-    assert store.get()["version"] == 999
+    assert store.get()["version"] == 6
 
     # File disappears; a forced refresh must silently retain the last good formula
     # while surfacing a non-None error (silent-failure semantics).
     os.remove(path)
     f = store.get(force=True)
-    assert f["version"] == 999
+    assert f["version"] == 6
     meta = store.meta()
     assert meta["source"] == "cloud"
     assert meta["error"] is not None

@@ -18,6 +18,7 @@
 """
 import json
 import hashlib
+import math
 import os
 import time
 import urllib.request
@@ -255,93 +256,538 @@ _DEFAULT_CANONICAL = json.dumps(DEFAULT_FORMULA, sort_keys=True, ensure_ascii=Fa
 DEFAULT_FORMULA_HASH = hashlib.sha256(_DEFAULT_CANONICAL.encode("utf-8")).hexdigest()
 
 
+# ---------------------------------------------------------------------------
+# Phase 7: remote-formula trust boundary
+# ---------------------------------------------------------------------------
+# Trust model (what this module DOES and does NOT do):
+#   * The payload is INERT DATA (params / views / constants / formulas). It is
+#     never eval'd or exec'd; only the sections the app actually consumes are
+#     interpreted.
+#   * HTTPS transport is used for the production default URL. Strict
+#     schema/version validation, bounded payload size and a finite fetch timeout
+#     guard the boundary. On any failure the previous good formula is retained
+#     (last-known-good), never cleared, and adoption/persistence is atomic
+#     (tmp file + os.replace).
+#   * NO signature verification is implemented here. There is no independent
+#     trust root or key-distribution channel, so the payload is reported with
+#     integrity_status="unsigned". It is deliberately NEVER described as
+#     "signed" or "secured".
+# ---------------------------------------------------------------------------
+SUPPORTED_FORMULA_SCHEMA = 1
+MIN_SUPPORTED_FORMULA_VERSION = 1
+MAX_SUPPORTED_FORMULA_VERSION = 7
+MAX_FORMULA_BYTES = 512 * 1024
+FORMULA_FETCH_TIMEOUT_S = 5
+
+# Named per-value caps (reject oversized payloads before they can hurt us).
+MAX_FORMULA_STRING_LEN = 512
+MAX_FORMULA_LIST_LEN = 2000
+MAX_FORMULA_DICT_KEYS = 5000
+
+# Documented, safely-ignored metadata bag + the only allowed top-level keys.
+ALLOWED_FORMULA_TOP_LEVEL = frozenset({
+    "version", "schema_version", "source_note", "params", "constants",
+    "formulas", "views", "extensions",
+})
+
+_VALIDATION_CATEGORIES = frozenset({
+    "unsupported_schema", "too_old", "too_new", "disabled",
+})
+
+
 class FormulaError(Exception):
     pass
+
+
+def _is_int(x):
+    return isinstance(x, int) and not isinstance(x, bool)
+
+
+def _is_number(x):
+    return isinstance(x, (int, float)) and not isinstance(x, bool)
+
+
+def _is_finite(x):
+    return _is_number(x) and math.isfinite(float(x))
+
+
+def _oversized(value):
+    """Return an error code when any string/list/dict exceeds the named caps."""
+    if isinstance(value, str):
+        return "oversized_string" if len(value) > MAX_FORMULA_STRING_LEN else None
+    if isinstance(value, list):
+        if len(value) > MAX_FORMULA_LIST_LEN:
+            return "oversized_list"
+        for item in value:
+            err = _oversized(item)
+            if err:
+                return err
+        return None
+    if isinstance(value, dict):
+        if len(value) > MAX_FORMULA_DICT_KEYS:
+            return "oversized_dict"
+        for key, val in value.items():
+            if isinstance(key, str) and len(key) > MAX_FORMULA_STRING_LEN:
+                return "oversized_string"
+            err = _oversized(val)
+            if err:
+                return err
+        return None
+    return None
+
+
+def _bad_str_map(mapping, code):
+    if not isinstance(mapping, dict):
+        return code
+    for key, value in mapping.items():
+        if not isinstance(key, str) or not isinstance(value, str):
+            return code
+    return None
+
+
+def _bad_str_list(items, code):
+    if not isinstance(items, list):
+        return code
+    for value in items:
+        if not isinstance(value, str):
+            return code
+    return None
+
+
+def _bad_number_map(mapping, code, *, nonneg=False, positive=False):
+    if not isinstance(mapping, dict):
+        return code
+    for value in mapping.values():
+        if not _is_finite(value):
+            return code
+        number = float(value)
+        if nonneg and number < 0:
+            return code
+        if positive and number <= 0:
+            return code
+    return None
+
+
+def _bad_prices(prices):
+    if not isinstance(prices, dict):
+        return "bad_prices"
+    for value in prices.values():
+        if not isinstance(value, dict):
+            return "bad_prices"
+        for entry in value.values():
+            if entry is None:
+                continue
+            if not _is_finite(entry) or float(entry) < 0:
+                return "bad_prices"
+    return None
+
+
+def _bad_constants(constants):
+    if not isinstance(constants, dict):
+        return "bad_constants"
+    for key, value in constants.items():
+        # The documented "note" key is inert metadata (DEFAULT_FORMULA uses it);
+        # every other entry must be a finite number.
+        if key == "note" and isinstance(value, str):
+            continue
+        if not _is_finite(value):
+            return "bad_constants"
+    return None
+
+
+def _bad_params(params):
+    if not isinstance(params, dict):
+        return "bad_params"
+    if "limits" in params:
+        err = _bad_number_map(params["limits"], "bad_limits", nonneg=True)
+        if err:
+            return err
+    if "windows" in params:
+        windows = params["windows"]
+        if not isinstance(windows, dict):
+            return "bad_windows"
+        for value in windows.values():
+            if not _is_int(value) or value <= 0:
+                return "bad_windows"
+    if "meter" in params:
+        meter = params["meter"]
+        if not isinstance(meter, dict):
+            return "bad_meter"
+        for key in ("ratio", "rate_default", "rate_intercept"):
+            if key in meter and not _is_finite(meter[key]):
+                return "bad_meter"
+        if "rates" in meter:
+            err = _bad_number_map(meter["rates"], "bad_meter")
+            if err:
+                return err
+    if "sources" in params:
+        sources = params["sources"]
+        if not isinstance(sources, dict):
+            return "bad_sources"
+        if "paid" in sources:
+            err = _bad_str_list(sources["paid"], "bad_sources")
+            if err:
+                return err
+        if "subset_of" in sources:
+            err = _bad_str_map(sources["subset_of"], "bad_sources")
+            if err:
+                return err
+    if "providers" in params:
+        providers = params["providers"]
+        if not isinstance(providers, dict):
+            return "bad_providers"
+        if "src" in providers:
+            err = _bad_str_map(providers["src"], "bad_providers")
+            if err:
+                return err
+        if "prefixes" in providers:
+            err = _bad_str_list(providers["prefixes"], "bad_providers")
+            if err:
+                return err
+        if "aliases" in providers:
+            err = _bad_str_map(providers["aliases"], "bad_providers")
+            if err:
+                return err
+    if "free_models" in params:
+        free_models = params["free_models"]
+        if not isinstance(free_models, dict):
+            return "bad_free_models"
+        for value in free_models.values():
+            err = _bad_str_list(value, "bad_free_models")
+            if err:
+                return err
+    if "prices" in params:
+        err = _bad_prices(params["prices"])
+        if err:
+            return err
+    if "model_quotas" in params:
+        quotas = params["model_quotas"]
+        if not isinstance(quotas, dict):
+            return "bad_model_quotas"
+        for key, value in quotas.items():
+            if not isinstance(key, str) or not _is_finite(value) or float(value) < 0:
+                return "bad_model_quotas"
+    if "req_limits" in params:
+        req_limits = params["req_limits"]
+        if not isinstance(req_limits, dict):
+            return "bad_req_limits"
+        for value in req_limits.values():
+            if not isinstance(value, list):
+                return "bad_req_limits"
+            for entry in value:
+                if not _is_finite(entry) or float(entry) < 0:
+                    return "bad_req_limits"
+    if "tokens_per_req" in params:
+        tokens = params["tokens_per_req"]
+        if not isinstance(tokens, dict):
+            return "bad_tokens_per_req"
+        for value in tokens.values():
+            if not _is_finite(value) or float(value) <= 0:
+                return "bad_tokens_per_req"
+    if "display_names" in params:
+        err = _bad_str_map(params["display_names"], "bad_display_names")
+        if err:
+            return err
+    if "refresh" in params:
+        refresh = params["refresh"]
+        if _is_number(refresh):
+            if not _is_finite(refresh) or float(refresh) <= 0:
+                return "bad_refresh"
+        elif isinstance(refresh, dict):
+            for value in refresh.values():
+                if not _is_finite(value) or float(value) <= 0:
+                    return "bad_refresh"
+        else:
+            return "bad_refresh"
+    return None
+
+
+def validate_formula(f):
+    """Pure validation of a remote formula document.
+
+    Returns ``{"ok", "error", "schema_version", "formula_version"}``. It never
+    raises and never mutates ``f``. ``error`` is a stable machine-readable code
+    (``None`` when ok); ``schema_version``/``formula_version`` are echoed even
+    on rejection where known so callers can report provenance.
+    """
+    result = {"ok": False, "error": None,
+              "schema_version": None, "formula_version": None}
+    if not isinstance(f, dict):
+        result["error"] = "not_a_dict"
+        return result
+
+    # Legacy documents predate schema_version and are treated as schema 1.
+    schema = f.get("schema_version", SUPPORTED_FORMULA_SCHEMA)
+    if not _is_int(schema):
+        result["error"] = "unsupported_schema"
+        return result
+    result["schema_version"] = schema
+    if schema != SUPPORTED_FORMULA_SCHEMA:
+        result["error"] = "unsupported_schema"
+        return result
+
+    version = f.get("version")
+    if not _is_int(version):
+        result["error"] = "bad_version"
+        return result
+    result["formula_version"] = version
+    if version < MIN_SUPPORTED_FORMULA_VERSION:
+        result["error"] = "too_old"
+        return result
+    if version > MAX_SUPPORTED_FORMULA_VERSION:
+        result["error"] = "too_new"
+        return result
+
+    for key in f:
+        if key not in ALLOWED_FORMULA_TOP_LEVEL:
+            result["error"] = "unknown_field"
+            return result
+
+    if "params" not in f:
+        result["error"] = "missing_params"
+        return result
+    if "views" not in f:
+        result["error"] = "missing_views"
+        return result
+
+    err = _bad_params(f["params"])
+    if err:
+        result["error"] = err
+        return result
+    if "constants" in f:
+        err = _bad_constants(f["constants"])
+        if err:
+            result["error"] = err
+            return result
+    if "formulas" in f and not isinstance(f["formulas"], dict):
+        result["error"] = "bad_formulas"
+        return result
+    if not isinstance(f["views"], list):
+        result["error"] = "bad_views"
+        return result
+    for view in f["views"]:
+        if not isinstance(view, dict):
+            result["error"] = "bad_views"
+            return result
+    if "extensions" in f and not isinstance(f["extensions"], dict):
+        result["error"] = "bad_extensions"
+        return result
+
+    err = _oversized(f)
+    if err:
+        result["error"] = err
+        return result
+
+    result["ok"] = True
+    return result
+
+
+def _validation_category(error):
+    """Map a granular validate_formula error code to a meta status category."""
+    if error is None:
+        return None
+    if error in _VALIDATION_CATEGORIES:
+        return error
+    return "invalid"
 
 
 class FormulaStore:
     """拉取/缓存/回退公式。url 可为 http(s) 或本地文件路径。
 
     enabled=False 时完全不联网, 直接使用内置 DEFAULT_FORMULA (source="disabled")。
-    meta() 额外暴露 hash/version/fallback/last_updated 溯源字段。
+    任何失败都按 last-known-good 顺序回退: 内存中已生效公式 → 持久化缓存
+    → DEFAULT_FORMULA; 已生效公式绝不会被清空。
+
+    cache_path 提供时, 校验通过的公式以
+    {"schema_version","formula_version","loaded_at","integrity_status",
+     "formula"} 包装原子落盘 (tmp + os.replace); 缓存内容在采用前也必须
+    通过 validate_formula。残留的 ``.tmp`` 文件不影响加载。
+
+    meta() 额外暴露 hash/version/fallback/last_updated 及 Phase 7 溯源字段
+    (schema_version/formula_version/loaded_at/validation_status/
+    integrity_status)。integrity_status 恒为 "unsigned": 本阶段没有独立
+    信任根/密钥分发, 不做签名校验。
     """
 
-    def __init__(self, url=None, ttl=900, enabled=True):
+    def __init__(self, url=None, ttl=900, enabled=True, cache_path=None):
         self.raw_url = url if url is not None else os.environ.get("FORMULA_URL")
         self.url = resolve_formula_url(self.raw_url)
         self.ttl = ttl
         self.enabled = enabled
+        self.cache_path = cache_path
         # 当前生效公式的溯源状态
         self._formula = None
         self._raw = None
         self._hash = DEFAULT_FORMULA_HASH
         self._version = DEFAULT_FORMULA.get("version")
+        self._schema_version = DEFAULT_FORMULA.get(
+            "schema_version", SUPPORTED_FORMULA_SCHEMA)
         self._fallback = True
         self._ts = 0.0
-        self._meta = {"source": "default", "url": self.url, "error": None,
-                      "fetched_at": 0, "enabled": enabled,
-                      "hash": self._hash, "version": self._version,
-                      "last_updated": 0, "fallback": True}
+        self._source = "default"
+        self._error = None
+        self._fetched_at = 0
+        self._last_updated = 0
+        self._loaded_at = 0
+        self._validation_status = "ok"
+        self._meta = {}
+        # 冷启动即载入持久化 LKG (若存在且通过校验), 作为内存 last-known-good。
+        if self.enabled:
+            self._load_cache_into_memory()
+        self._rebuild_meta()
+
+    # -- provenance -------------------------------------------------------
+    def _rebuild_meta(self):
+        self._meta = {
+            "source": self._source, "url": self.url, "error": self._error,
+            "fetched_at": self._fetched_at, "enabled": self.enabled,
+            "hash": self._hash, "version": self._version,
+            "last_updated": self._last_updated, "fallback": self._fallback,
+            "schema_version": self._schema_version,
+            "formula_version": self._version,
+            "loaded_at": self._loaded_at,
+            "validation_status": self._validation_status,
+            "integrity_status": "unsigned",
+        }
+
+    def _set_default(self, *, source, error, validation_status, fetched_at,
+                     last_updated=0):
+        self._formula = DEFAULT_FORMULA
+        self._raw = None
+        self._hash = DEFAULT_FORMULA_HASH
+        self._version = DEFAULT_FORMULA.get("version")
+        self._schema_version = DEFAULT_FORMULA.get(
+            "schema_version", SUPPORTED_FORMULA_SCHEMA)
+        self._fallback = True
+        self._source = source
+        self._error = error
+        self._fetched_at = fetched_at
+        self._last_updated = last_updated
+        self._loaded_at = 0
+        self._validation_status = validation_status
+        self._rebuild_meta()
+
+    def _adopt_cached(self, formula, res, payload, error):
+        self._formula = formula
+        self._raw = None
+        self._hash = _sha256_hex(
+            json.dumps(formula, sort_keys=True, ensure_ascii=False))
+        self._version = res["formula_version"]
+        self._schema_version = res["schema_version"]
+        self._fallback = True
+        self._source = "cache"
+        self._error = error
+        self._loaded_at = payload.get("loaded_at") or 0
+        self._validation_status = "ok"
+        self._rebuild_meta()
+
+    def _adopt_fallback(self, error, category):
+        # 1) 内存中 last-known-good: 保留当前公式, 绝不清空
+        if self._formula is not None:
+            self._fallback = True
+            self._error = error
+            if category is not None:
+                self._validation_status = category
+            self._rebuild_meta()
+            return
+        # 2) 持久化缓存 (采用前已通过 validate_formula)
+        cached = self._read_cache()
+        if cached is not None:
+            self._adopt_cached(cached[0], cached[1], cached[2], error)
+            return
+        # 3) 内置默认公式
+        self._set_default(source="default", error=error,
+                          validation_status="ok", fetched_at=0)
+
+    def _load_cache_into_memory(self):
+        cached = self._read_cache()
+        if cached is None:
+            return
+        self._adopt_cached(cached[0], cached[1], cached[2], None)
+
+    def _read_cache(self):
+        """Read + validate the persisted cache; None on any failure.
+
+        A leftover ``.tmp`` is never consulted (only ``cache_path`` itself).
+        """
+        if not self.cache_path:
+            return None
+        try:
+            with open(self.cache_path, "r", encoding="utf-8") as fh:
+                payload = json.load(fh)
+        except Exception:
+            return None
+        if not isinstance(payload, dict):
+            return None
+        formula = payload.get("formula")
+        res = validate_formula(formula)
+        if not res["ok"]:
+            return None
+        return formula, res, payload
+
+    def _persist_cache(self, formula, res):
+        """Atomically persist the validated formula + provenance metadata."""
+        if not self.cache_path:
+            return
+        try:
+            payload = {
+                "schema_version": res["schema_version"],
+                "formula_version": res["formula_version"],
+                "loaded_at": int(time.time() * 1000),
+                "integrity_status": "unsigned",
+                "formula": formula,
+            }
+            directory = os.path.dirname(self.cache_path)
+            if directory:
+                os.makedirs(directory, exist_ok=True)
+            tmp = self.cache_path + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as fh:
+                json.dump(payload, fh, ensure_ascii=False)
+            os.replace(tmp, self.cache_path)
+        except Exception:
+            # 缓存持久化是 best-effort, 失败绝不影响本次采用。
+            pass
 
     def refresh(self, force=False):
         if not self.enabled:
             # 禁用: 绝不调用 _fetch, 也不触网; 直接用内置默认公式
             ts = int(time.time() * 1000)
-            self._formula = DEFAULT_FORMULA
-            self._raw = None
-            self._hash = DEFAULT_FORMULA_HASH
-            self._version = DEFAULT_FORMULA.get("version")
-            self._fallback = True
-            self._meta = {"source": "disabled", "url": self.url, "error": None,
-                          "fetched_at": ts, "enabled": False,
-                          "hash": self._hash, "version": self._version,
-                          "fallback": True}
+            self._set_default(source="disabled", error=None,
+                              validation_status="disabled", fetched_at=ts,
+                              last_updated=ts)
             return False
         if self.url:
             try:
                 data = self._fetch(self.url)
                 f = json.loads(data)
-                self._validate(f)
+                res = validate_formula(f)
+                if not res["ok"]:
+                    raise FormulaError(res["error"] or "invalid_formula")
                 fetched_at = int(time.time() * 1000)
+                # 校验通过后才采用 (atomic adoption): 先落盘再切换。
+                self._persist_cache(f, res)
                 self._formula = f
                 self._raw = data
                 # 成功时 hash 针对"原始拉取串", 保证与云端字节一致
                 self._hash = _sha256_hex(data)
-                self._version = f.get("version")
+                self._version = res["formula_version"]
+                self._schema_version = res["schema_version"]
                 self._fallback = False
-                self._meta = {"source": "cloud", "url": self.url, "error": None,
-                              "fetched_at": fetched_at, "enabled": True,
-                              "hash": self._hash, "version": self._version,
-                              "last_updated": fetched_at, "fallback": False}
+                self._source = "cloud"
+                self._error = None
+                self._fetched_at = fetched_at
+                self._last_updated = fetched_at
+                self._loaded_at = fetched_at
+                self._validation_status = "ok"
+                self._rebuild_meta()
                 return True
             except Exception as e:
-                # 失败: 保留上一版已生效公式; 无则退回默认。
-                # hash/version 始终反映实际生效的公式。
-                src = "cloud" if self._formula is not None else "default"
-                if self._formula is None:
-                    self._formula = DEFAULT_FORMULA
-                    self._raw = None
-                    self._hash = DEFAULT_FORMULA_HASH
-                    self._version = DEFAULT_FORMULA.get("version")
-                self._fallback = True
-                self._meta = {"source": src, "url": self.url, "error": str(e),
-                              "fetched_at": self._meta.get("fetched_at", 0),
-                              "enabled": True, "hash": self._hash,
-                              "version": self._version,
-                              "last_updated": self._meta.get("fetched_at", 0),
-                              "fallback": True}
-        else:
-            self._formula = DEFAULT_FORMULA
-            self._raw = None
-            self._hash = DEFAULT_FORMULA_HASH
-            self._version = DEFAULT_FORMULA.get("version")
-            self._fallback = True
-            self._meta = {"source": "default", "url": "", "error": None,
-                          "fetched_at": 0, "enabled": True,
-                          "hash": self._hash, "version": self._version,
-                          "last_updated": 0, "fallback": True}
-        if self._formula is None:
-            self._formula = DEFAULT_FORMULA
+                category = _validation_category(
+                    str(e) if isinstance(e, FormulaError) else None)
+                self._adopt_fallback(str(e), category)
+                return False
+        self._set_default(source="default", error=None, validation_status="ok",
+                          fetched_at=0)
         return False
 
     def get(self, force=False):
@@ -360,24 +806,29 @@ class FormulaStore:
                 "User-Agent": "opencode-widget/1.0 (+formula)",
                 "Accept": "application/json",
             })
-            with urllib.request.urlopen(req, timeout=5) as resp:
-                return resp.read().decode("utf-8")
+            with urllib.request.urlopen(req, timeout=FORMULA_FETCH_TIMEOUT_S) as resp:
+                data = resp.read(MAX_FORMULA_BYTES + 1)
+                if len(data) > MAX_FORMULA_BYTES:
+                    raise FormulaError("formula_too_large")
+                return data.decode("utf-8")
         path = url
         if url.startswith("file://"):
             path = url[len("file://"):]
         if os.path.exists(path):
-            with open(path, "r", encoding="utf-8") as fh:
-                return fh.read()
+            with open(path, "rb") as fh:
+                data = fh.read(MAX_FORMULA_BYTES + 1)
+            if len(data) > MAX_FORMULA_BYTES:
+                raise FormulaError("formula_too_large")
+            # 保持与旧文本模式读取一致的通用换行语义 (CRLF/CR -> LF)。
+            return data.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
         raise FormulaError(f"无法读取公式来源: {url}")
 
     @staticmethod
     def _validate(f):
-        if not isinstance(f, dict):
-            raise FormulaError("公式必须是 JSON 对象")
-        if "params" not in f or "views" not in f:
-            raise FormulaError("公式缺少 params 或 views")
-        if "formulas" in f and not isinstance(f["formulas"], dict):
-            raise FormulaError("formulas 必须是对象")
+        res = validate_formula(f)
+        if not res["ok"]:
+            raise FormulaError(res["error"] or "invalid_formula")
+        return f
 
 
 class ViewEngine:
