@@ -3,11 +3,39 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const runtimeEnv = require('./runtime_env');
+const runtimeManager = require('./runtime_manager');
 
-// 临时诊断：吸顶判定日志（排查后移除）
+// Phase 6A: diagnostics are opt-in (OPENCODE_WIDGET_DEBUG=1|true). In production
+// devTools is off and snap logging is a no-op.
+const DEBUG = runtimeManager.debugEnabled(process.env);
+
+// 单实例锁：第二个实例直接退出，不创建窗口/不启定时器/不启动 server 所有权逻辑。
+const gotLock = app.requestSingleInstanceLock();
+if (!gotLock) {
+  app.quit();
+  return;
+}
+
+// 第二实例被拉起：还原并聚焦已有主窗口，绝不动用户的尺寸/吸顶状态。
+app.on('second-instance', () => {
+  if (!win || win.isDestroyed()) return;
+  if (win.isMinimized()) win.restore();
+  win.show();
+  win.focus();
+});
+
+// 临时诊断：吸顶判定日志（排查后移除）。仅 debug 开启；超 ~1MB 轮转保留一份 .1
 const SNAP_LOG = path.join(os.tmpdir(), 'widget_snap.log');
 function debugSnap(msg) {
-  try { fs.appendFileSync(SNAP_LOG, new Date().toISOString() + ' ' + msg + '\n'); } catch (_) { /* ignore */ }
+  if (!DEBUG) return;
+  try {
+    let size = 0;
+    try { size = fs.statSync(SNAP_LOG).size; } catch (_) { size = 0; }
+    if (runtimeManager.shouldRotateLog(size)) {
+      try { fs.renameSync(SNAP_LOG, SNAP_LOG + '.1'); } catch (_) { /* ignore */ }
+    }
+    fs.appendFileSync(SNAP_LOG, new Date().toISOString() + ' ' + msg + '\n');
+  } catch (_) { /* ignore */ }
 }
 
 // 登录态分区：持久化，登录一次后续免登录复用
@@ -174,6 +202,71 @@ function applyPendingSnap() {
   } catch (_) { /* ignore */ }
 }
 
+// Phase 6A: authenticated heartbeat keeps a living widget's server alive; the
+// server self-exits only after authenticated traffic stops for its idle window.
+// Failures are benign (no log spam, no retry storm, no extra server spawn).
+const HEARTBEAT_INTERVAL_MS = 60000;
+const QUIT_PROBE_TIMEOUT_MS = 1500;
+let heartbeatTimer = null;
+
+async function sendHeartbeat() {
+  const r = runtimeEnv.readRuntimeOnce(process.env);
+  if (!r.ok) return; // server not up (or already gone): nothing to do
+  try {
+    await fetch(r.base + runtimeManager.heartbeatPath(), {
+      headers: { 'Authorization': 'Bearer ' + r.token },
+    });
+  } catch (_) { /* silent/benign */ }
+}
+
+function startHeartbeat() {
+  if (heartbeatTimer) return;
+  heartbeatTimer = setInterval(() => { sendHeartbeat(); }, HEARTBEAT_INTERVAL_MS);
+}
+
+function stopHeartbeat() {
+  if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
+}
+
+// Quit path: only terminate a server we can positively identify as ours.
+// Read runtime.json; if it has pid+token, probe the authenticated heartbeat
+// endpoint (short timeout). Probe success -> kill pid (best effort) and unlink
+// runtime.json only if it still names the same pid. Probe failure -> leave the
+// stale file untouched for startup handling; never kill an innocent process.
+async function terminateOwnedServer() {
+  const info = runtimeManager.readRuntimeInfo();
+  if (!info || typeof info.token !== 'string' || !info.token) return;
+  if (typeof info.pid !== 'number' || !Number.isInteger(info.pid) || info.pid <= 0) return;
+  if (typeof info.port !== 'number' || !Number.isInteger(info.port) || info.port <= 0) return;
+
+  let probeOk = false;
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), QUIT_PROBE_TIMEOUT_MS);
+    try {
+      const resp = await fetch(
+        'http://127.0.0.1:' + info.port + runtimeManager.heartbeatPath(),
+        {
+          headers: { 'Authorization': 'Bearer ' + info.token },
+          signal: controller.signal,
+        }
+      );
+      probeOk = !!resp.ok;
+    } finally {
+      clearTimeout(timer);
+    }
+  } catch (_) { probeOk = false; }
+
+  if (!runtimeManager.shouldTerminateOwnedServer(info, probeOk)) return;
+  try { process.kill(info.pid); } catch (_) { /* best effort */ }
+  try {
+    const again = runtimeManager.readRuntimeInfo();
+    if (runtimeManager.ownedServerMatches(again, info.pid)) {
+      fs.unlinkSync(runtimeManager.runtimeFilePath());
+    }
+  } catch (_) { /* best effort */ }
+}
+
 function createWindow() {
   const wa = screen.getPrimaryDisplay().workArea;
   win = new BrowserWindow({
@@ -195,6 +288,7 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      devTools: DEBUG,
     },
   });
 
@@ -231,6 +325,7 @@ function createWindow() {
 
 app.whenReady().then(() => {
   createWindow();
+  startHeartbeat();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -239,6 +334,23 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   app.quit();
+});
+
+// 正常退出：停掉所有定时器、关闭登录窗口，然后回收自己拥有的 Python server
+// 并删除 runtime.json。guard + preventDefault 保证只跑一次清理，再真正 quit。
+let quitCleanupStarted = false;
+app.on('will-quit', (event) => {
+  if (quitCleanupStarted) return;
+  quitCleanupStarted = true;
+  event.preventDefault();
+  stopHeartbeat();
+  stopClickThroughPoll();
+  if (loginWin && !loginWin.isDestroyed()) {
+    try { loginWin.close(); } catch (_) { /* ignore */ }
+  }
+  terminateOwnedServer()
+    .catch(() => { /* best effort */ })
+    .finally(() => { app.quit(); });
 });
 
 ipcMain.handle('resize', (e, uiState) => {
@@ -372,6 +484,7 @@ ipcMain.handle('grab-auth', async () => {
         contextIsolation: true,
         nodeIntegration: false,
         sandbox: true,
+        devTools: DEBUG,
       },
     });
     loginWin.loadURL(opencodeAuthUrl());
