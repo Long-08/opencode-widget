@@ -15,7 +15,8 @@
 | 5A | Observability Dashboard UI | **COMPLETE** |
 | 5.1 | Frontend structure cleanup (no behavior change) | **COMPLETE** |
 | 5B | Advanced visualization (charts) | PLANNED |
-| 6 | Desktop UX & Hygiene | PLANNED |
+| 6A | Desktop lifecycle & hygiene | **COMPLETE** |
+| 6B | Notifications & tray UX | PLANNED |
 
 ## Permanent constraints
 
@@ -74,9 +75,12 @@ behavior change; see `docs/PHASE5_1_FRONTEND_STRUCTURE.md`.
 **Phase 5B (PLANNED):** advanced visualization (charts in Agent/Model detail) and a Forecast
 screen once Phase 4 exists. Providers remains a filter/detail dimension, not a standalone tab.
 
-## Phase 6 — Desktop UX & Hygiene (PLANNED, not implemented)
+## Phase 6 — Desktop UX & Hygiene
 
-- Tray, autostart, notifications
-- P3 hygiene items from the Phase-1 audit (cookie-DB temp copies, snap log, devtools flag,
-  widget DB retention)
-- Formula signing/version pinning
+**Phase 6A — Desktop lifecycle & hygiene — COMPLETE.** Single-instance semantics, server
+ownership on quit, orphan/idle watchdog, stale-runtime recovery, cookie-temp cleanup,
+opt-in debug logging with rotation, production DevTools policy, port-collision behavior,
+and a documented DB retention policy. See `docs/PHASE6A_DESKTOP_LIFECYCLE.md`.
+
+**Phase 6B (PLANNED):** notifications/quota alerts, tray UX, autostart toggle UI.
+Also still deferred: formula signing/version pinning.
