@@ -277,7 +277,7 @@ SUPPORTED_FORMULA_SCHEMA = 1
 MIN_SUPPORTED_FORMULA_VERSION = 1
 MAX_SUPPORTED_FORMULA_VERSION = 7
 MAX_FORMULA_BYTES = 512 * 1024
-FORMULA_FETCH_TIMEOUT_S = 5
+FORMULA_FETCH_TIMEOUT_S = 2
 
 # Named per-value caps (reject oversized payloads before they can hurt us).
 MAX_FORMULA_STRING_LEN = 512
@@ -634,6 +634,16 @@ class FormulaStore:
         # 冷启动即载入持久化 LKG (若存在且通过校验), 作为内存 last-known-good。
         if self.enabled:
             self._load_cache_into_memory()
+        # Phase 7 fix: a formula adopted from the persisted cache at construction
+        # is treated as fresh for one TTL. Without this, ``_ts`` stays 0 and the
+        # very first ``get()`` on every launch performs a synchronous network
+        # refresh (up to FORMULA_FETCH_TIMEOUT_S) before falling back to the same
+        # cache — i.e. startup blocked on the network despite having a valid
+        # last-known-good. The background formula-sync loop still refreshes with
+        # ``force=True`` (non-blocking launch, cloud updates asynchronously), and
+        # an explicit ``force=True`` here still fetches.
+        if self._formula is not None:
+            self._ts = time.time()
         self._rebuild_meta()
 
     # -- provenance -------------------------------------------------------

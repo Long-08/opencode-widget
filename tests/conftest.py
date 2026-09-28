@@ -139,6 +139,10 @@ def isolated_state(gw, monkeypatch, tmp_path):
 
     monkeypatch.setattr(ds, "_FORMULA_STORE", vw.FormulaStore(url=""))
     monkeypatch.setattr(ds, "_FORMULA_ENGINE", None)
+    # Keep the persisted formula cache inside the test's tmp dir: tests must
+    # never read or overwrite the real %APPDATA%\opencode-widget cache.
+    monkeypatch.setattr(ds, "_formula_cache_path",
+                        lambda: str(tmp_path / "formula_cache.json"))
 
     # --- remote / server DB paths ---
     import server_data as sd

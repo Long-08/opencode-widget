@@ -505,6 +505,37 @@ def test_store_cache_write_failure_never_blocks_adoption(tmp_path, monkeypatch):
     assert store.meta()["source"] == "cloud"
 
 
+def test_cached_formula_cold_start_does_not_touch_network(tmp_path, monkeypatch):
+    # Phase 7 startup fix: with a valid persisted LKG, the first (non-forced)
+    # get() must serve it without a synchronous network refresh.
+    cache = tmp_path / "cache.json"
+    src = tmp_path / "f.json"
+    _write(src, _base_formula(version=5))
+    views.FormulaStore(url=str(src), cache_path=str(cache)).get()
+    assert cache.exists()
+
+    calls = []
+
+    def _record(req, timeout=None):
+        calls.append(timeout)
+        return _fake_response(json.dumps(_base_formula(version=6)).encode("utf-8"))
+
+    monkeypatch.setattr(views.urllib.request, "urlopen", _record)
+
+    cold = views.FormulaStore(url="https://formula.invalid/f.json",
+                              cache_path=str(cache))
+    formula = cold.get()
+    assert formula["version"] == 5
+    assert cold.meta()["source"] == "cache"
+    assert calls == []          # cold start did not block on the network
+
+    # An explicit force still refreshes from the network.
+    forced = cold.get(force=True)
+    assert forced["version"] == 6
+    assert cold.meta()["source"] == "cloud"
+    assert calls == [views.FORMULA_FETCH_TIMEOUT_S]
+
+
 # ---------------------------------------------------------------------------
 # FormulaStore: opt-out + provenance
 # ---------------------------------------------------------------------------
