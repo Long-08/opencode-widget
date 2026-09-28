@@ -41,8 +41,12 @@ function createNotificationManager(deps) {
   const showNotification = typeof d.showNotification === 'function' ? d.showNotification : () => false;
   const log = typeof d.log === 'function' ? d.log : () => {};
 
+  const minIntervalMs =
+    typeof d.minIntervalMs === 'number' && Number.isFinite(d.minIntervalMs) && d.minIntervalMs > 0
+      ? Math.round(d.minIntervalMs)
+      : MIN_INTERVAL_MS;
   const intervalMs = Math.max(
-    MIN_INTERVAL_MS,
+    minIntervalMs,
     typeof d.intervalMs === 'number' && Number.isFinite(d.intervalMs) && d.intervalMs > 0
       ? Math.round(d.intervalMs)
       : DEFAULT_INTERVAL_MS

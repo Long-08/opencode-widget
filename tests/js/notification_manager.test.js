@@ -230,3 +230,17 @@ test('setSettings rejects invalid payloads through the policy', (t) => {
   assert.ok(bad.error);
   assert.equal(manager.getSettings().enabled, false);
 });
+
+test('interval clamps to MIN_INTERVAL_MS unless the fixture seam is used', (t) => {
+  const base = {
+    statePath: makeTempStatePath(t),
+    fetchForecast: async () => null,
+    showNotification: () => false,
+    focusWidget() {},
+    openForecast() {},
+    log() {},
+    now: () => MS,
+  };
+  assert.equal(nm.createNotificationManager({ ...base, intervalMs: 3000 }).intervalMs, nm.MIN_INTERVAL_MS);
+  assert.equal(nm.createNotificationManager({ ...base, intervalMs: 3000, minIntervalMs: 1000 }).intervalMs, 3000);
+});

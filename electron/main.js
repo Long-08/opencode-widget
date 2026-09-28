@@ -252,8 +252,11 @@ function notificationStatePath() {
 
 function notificationIntervalMs() {
   const raw = Number(process.env.OPENCODE_WIDGET_NOTIFY_INTERVAL_S);
+  // Production floor is >= 15 min; the fixture/test seam may go lower so the
+  // smoke can step evaluations deterministically.
+  const floor = process.env.OPENCODE_WIDGET_NOTIFY_FIXTURE ? 1000 : NOTIFICATION_MIN_INTERVAL_MS;
   if (Number.isFinite(raw) && raw > 0) {
-    return Math.max(NOTIFICATION_MIN_INTERVAL_MS, Math.round(raw * 1000));
+    return Math.max(floor, Math.round(raw * 1000));
   }
   return NOTIFICATION_DEFAULT_INTERVAL_MS;
 }
@@ -330,6 +333,10 @@ function startNotificationManager() {
     openForecast: openForecast,
     log: notifyLog,
     intervalMs: notificationIntervalMs(),
+    // Test/fixture mode only: allow a short evaluation interval so the smoke can
+    // step baseline/notify/cooldown/quiet-hours deterministically. Production
+    // (no fixture) always uses MIN_INTERVAL_MS (>= 15 min).
+    minIntervalMs: process.env.OPENCODE_WIDGET_NOTIFY_FIXTURE ? 1000 : undefined,
     now: () => Date.now(),
   });
   notificationManager.start().catch(() => { /* best effort */ });
@@ -532,16 +539,22 @@ app.on('will-quit', (event) => {
   if (quitCleanupStarted) return;
   quitCleanupStarted = true;
   event.preventDefault();
-  stopNotificationManager();
-  destroyWidgetTray();
-  stopHeartbeat();
-  stopClickThroughPoll();
-  if (loginWin && !loginWin.isDestroyed()) {
-    try { loginWin.close(); } catch (_) { /* ignore */ }
-  }
-  terminateOwnedServer()
+  // Every step is individually guarded and a hard fallback guarantees the app
+  // always quits (a throwing/hanging cleanup step must never wedge shutdown).
+  let finished = false;
+  const finish = () => { if (finished) return; finished = true; try { app.quit(); } catch (_) { /* ignore */ } };
+  setTimeout(finish, 3000);
+  try { stopNotificationManager(); } catch (_) { /* ignore */ }
+  try { destroyWidgetTray(); } catch (_) { /* ignore */ }
+  try { stopHeartbeat(); } catch (_) { /* ignore */ }
+  try { stopClickThroughPoll(); } catch (_) { /* ignore */ }
+  try {
+    if (loginWin && !loginWin.isDestroyed()) loginWin.close();
+  } catch (_) { /* ignore */ }
+  Promise.resolve()
+    .then(() => terminateOwnedServer())
     .catch(() => { /* best effort */ })
-    .finally(() => { app.quit(); });
+    .finally(finish);
 });
 
 ipcMain.handle('resize', (e, uiState) => {
