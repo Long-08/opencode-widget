@@ -20,6 +20,8 @@ import json
 import os
 import tempfile
 
+import paths
+
 __all__ = [
     "SecretStoreError",
     "SecretBackend",
@@ -193,11 +195,19 @@ def backend_name() -> str:
 
 
 def secret_file_path() -> str:
-    """Resolve the secret file path (env override, else alongside this module)."""
+    """Resolve the secret file path.
+
+    ``OPENCODE_WIDGET_SECRET_FILE`` wins when set; otherwise the file lives in
+    the per-user data directory (``paths.secrets_path()``). The install-dir
+    location is only used as a last-resort fallback.
+    """
     override = os.environ.get(_ENV_VAR)
     if override:
         return override
-    return os.path.join(os.path.dirname(os.path.abspath(__file__)), _SECRET_FILE)
+    try:
+        return paths.secrets_path()
+    except Exception:
+        return os.path.join(os.path.dirname(os.path.abspath(__file__)), _SECRET_FILE)
 
 
 # ---------------------------------------------------------------------------

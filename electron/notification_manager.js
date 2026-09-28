@@ -14,6 +14,9 @@ const policy = require('./notification_policy');
 
 const MIN_INTERVAL_MS = 15 * 60 * 1000;
 const DEFAULT_INTERVAL_MS = 900 * 1000; // 15 minutes
+// Phase 7: notification state schema version. Files without a version are
+// treated as 1 and upgraded on the next save; newer files are never overwritten.
+const STATE_VERSION = 1;
 
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
@@ -58,9 +61,13 @@ function createNotificationManager(deps) {
   let started = false;
   let running = false;
   let shuttingDown = false;
+  // Set when the on-disk state was written by a newer build; such a file must
+  // never be overwritten.
+  let stateVersionBlocked = false;
 
   function defaultState() {
     return {
+      version: STATE_VERSION,
       settings: policy.normalizeSettings(policy.DEFAULT_SETTINGS, {}),
       baseline_done: false,
       events: [],
@@ -70,6 +77,7 @@ function createNotificationManager(deps) {
 
   function loadState() {
     if (state) return state;
+    stateVersionBlocked = false;
     let loaded = null;
     try {
       const raw = fs.readFileSync(statePath, 'utf8');
@@ -80,6 +88,14 @@ function createNotificationManager(deps) {
     }
     state = defaultState();
     if (loaded) {
+      const version = loaded.version;
+      if (typeof version === 'number' && Number.isFinite(version) && version > STATE_VERSION) {
+        // Newer schema: do not interpret or overwrite it. Run with defaults.
+        stateVersionBlocked = true;
+        return state;
+      }
+      // Missing/older version is migrated to the current version on next save.
+      state.version = STATE_VERSION;
       const validated = policy.validateSettingsPayload(loaded.settings || {});
       if (validated.ok) state.settings = policy.normalizeSettings(policy.DEFAULT_SETTINGS, validated.value);
       state.baseline_done = loaded.baseline_done === true;
@@ -90,6 +106,8 @@ function createNotificationManager(deps) {
   }
 
   function saveState() {
+    // A future-version file belongs to a newer build; never clobber it.
+    if (stateVersionBlocked) return;
     const serialized = JSON.stringify(state);
     const tmp = statePath + '.tmp';
     try {
@@ -229,4 +247,5 @@ module.exports = {
   createNotificationManager,
   MIN_INTERVAL_MS,
   DEFAULT_INTERVAL_MS,
+  STATE_VERSION,
 };

@@ -11,14 +11,23 @@ from datetime import datetime, timezone, timedelta
 from urllib.request import Request, urlopen
 
 import formula_registry as fr
+import paths
 import secret_store
 
 # 日期聚合统一用系统本地时区 (数据时间戳为 UTC, 用户在北京时间看"今天"需按本地边界)
 LOCAL_TZ = datetime.now().astimezone().tzinfo
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
-CONFIG_PATH = os.path.join(APP_DIR, "config.json")
+# Phase 7: mutable config lives in the per-user data dir, not the install dir.
+# Kept as a module-level string so tests can monkeypatch it.
+CONFIG_PATH = paths.config_path()
 INDEX_PATH = os.path.join(APP_DIR, "index.html")
+
+# Phase 7: config schema version. Files without the field are treated as v1 and
+# upgraded on the next secret-safe write; newer files are never overwritten.
+CONFIG_VERSION = 1
+_CONFIG_STATUS = "ok"
+_LEGACY_MIGRATION_DONE = False
 PYLIB = os.path.join(APP_DIR, "pylib")
 if os.path.isdir(PYLIB) and PYLIB not in sys.path:
     sys.path.insert(0, PYLIB)
@@ -343,16 +352,97 @@ def _strip_secret_fields(cfg):
     return out
 
 
-def load_config():
-    cfg = {}
-    if os.path.exists(CONFIG_PATH):
-        try:
-            with open(CONFIG_PATH, "r", encoding="utf-8-sig") as f:
-                cfg = json.load(f)
-        except Exception:
-            cfg = {}
+def _with_config_version(cfg):
+    """Return a copy of cfg with the current ``config_version`` set."""
+    out = dict(cfg) if isinstance(cfg, dict) else {}
+    out["config_version"] = CONFIG_VERSION
+    return out
+
+
+def _ensure_legacy_migration():
+    """Phase 7: migrate legacy in-repo data into the user data dir once.
+
+    Runs on the first config read. Idempotent and best-effort: any failure is
+    swallowed so a read-only install (or an unreadable legacy file) never
+    prevents the app from starting.
+    """
+    global _LEGACY_MIGRATION_DONE
+    if _LEGACY_MIGRATION_DONE:
+        return
+    _LEGACY_MIGRATION_DONE = True
+    try:
+        paths.migrate_legacy_data()
+    except Exception:
+        pass
+
+
+def _read_raw_config():
+    """Read CONFIG_PATH as a JSON object.
+
+    Returns ``(cfg, status)`` where status is ``"ok"`` for a missing file or an
+    object, and ``"corrupt"`` for unparsable/non-object content.
+    """
+    if not os.path.exists(CONFIG_PATH):
+        return {}, "ok"  # absent config is not an error -> defaults
+    try:
+        with open(CONFIG_PATH, "r", encoding="utf-8-sig") as f:
+            cfg = json.load(f)
+    except Exception:
+        return {}, "corrupt"
     if not isinstance(cfg, dict):
+        return {}, "corrupt"
+    return cfg, "ok"
+
+
+def _backup_corrupt_config():
+    """Move a corrupt CONFIG_PATH aside to ``<config>.corrupt.bak``.
+
+    Keeps at most one backup: an older backup is replaced. Best-effort; any
+    failure is swallowed so the caller can continue with defaults.
+    """
+    try:
+        backup = CONFIG_PATH + ".corrupt.bak"
+        if os.path.exists(backup):
+            try:
+                os.remove(backup)
+            except OSError:
+                pass
+        os.replace(CONFIG_PATH, backup)
+    except Exception:
+        pass
+
+
+def config_status():
+    """Non-sensitive status of the last config read.
+
+    One of ``"ok"``, ``"future_version"`` (file written by a newer build; left
+    untouched) or ``"corrupt"`` (unparsable file backed up and defaults used).
+    """
+    return _CONFIG_STATUS
+
+
+def load_config():
+    global _CONFIG_STATUS
+    _ensure_legacy_migration()
+
+    raw, read_status = _read_raw_config()
+    status = "ok"
+    if read_status == "corrupt":
+        _backup_corrupt_config()
+        status = "corrupt"
         cfg = {}
+        # The original file was moved away; do not manufacture a new one here.
+        version_pending = False
+    else:
+        cfg = raw
+        version = cfg.get("config_version")
+        if (isinstance(version, (int, float)) and not isinstance(version, bool)
+                and version > CONFIG_VERSION):
+            # Written by a newer build: never modify or overwrite it. Expose the
+            # parsed object as-is for this run.
+            _CONFIG_STATUS = "future_version"
+            return cfg
+        version_pending = "config_version" not in cfg
 
     # Phase 2B: load stored secrets. Unavailable/corrupt store -> compat mode:
     # never migrate, never overwrite anything, just return plaintext config.
@@ -366,9 +456,14 @@ def load_config():
         store_ok = False
 
     api_key, cookie = _plaintext_secrets(cfg)
+    # Plaintext secrets still sitting in the config: if migration fails below we
+    # must not persist a version (that would rewrite the file and could drop
+    # secrets that never reached the store).
+    raw_had_plaintext = bool(api_key or cookie)
 
     # Fail-safe migration: plaintext secrets in config.json move into the store
     # only after a verified write; on any failure config.json is left untouched.
+    persisted = False
     if store_ok and (api_key or cookie):
         try:
             merged = dict(stored)
@@ -383,9 +478,11 @@ def load_config():
             ):
                 raise secret_store.SecretStoreError("secret store verify failed")
             with open(CONFIG_PATH, "w", encoding="utf-8") as f:
-                json.dump(_strip_secret_fields(cfg), f, ensure_ascii=False, indent=2)
+                json.dump(_with_config_version(_strip_secret_fields(cfg)), f,
+                          ensure_ascii=False, indent=2)
             stored = verify
             cfg = _strip_secret_fields(cfg)
+            persisted = True
         except Exception:
             pass  # leave config.json untouched, keep returning plaintext values
 
@@ -401,12 +498,35 @@ def load_config():
                 srv = {}
                 cfg["server"] = srv
             srv["auth_cookie"] = stored_cookie
+
+    # Phase 7: persist the schema version for legacy configs (never for
+    # future-version or corrupt files). The write is best-effort and leaves the
+    # file untouched on failure. Secrets are handled carefully:
+    #   * with a working store, secrets are already in the store, so strip them;
+    #   * with no store backend, plaintext must be preserved verbatim;
+    #   * if migration was attempted but failed, never rewrite (would drop
+    #     secrets that never reached the store).
+    if version_pending and not persisted:
+        if store_ok and raw_had_plaintext:
+            pass  # fail-safe: leave the file untouched
+        else:
+            try:
+                out = _strip_secret_fields(cfg) if store_ok else cfg
+                with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+                    json.dump(_with_config_version(out), f,
+                              ensure_ascii=False, indent=2)
+            except Exception:
+                pass
+
+    _CONFIG_STATUS = status
     return cfg
 
 
 def save_config(cfg):
     if not isinstance(cfg, dict):
         cfg = {}
+    # Phase 7: every persisted config carries the schema version.
+    cfg = _with_config_version(cfg)
     api_key, cookie = _plaintext_secrets(cfg)
 
     # Phase 2.1: fail closed. While a secret backend is available, any store
@@ -424,7 +544,7 @@ def save_config(cfg):
         else:
             stored.pop("auth_cookie", None)
         secret_store.save_secrets(stored)
-        out = _strip_secret_fields(cfg)
+        out = _with_config_version(_strip_secret_fields(cfg))
     else:
         out = cfg
 

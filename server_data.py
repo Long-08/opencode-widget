@@ -8,8 +8,12 @@ from datetime import datetime, timezone
 from urllib.request import Request, urlopen
 from urllib.parse import quote
 
+import paths
+
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
-DB_PATH = os.path.join(APP_DIR, "server_usage.db")
+# Phase 7: mutable DB lives in the per-user data dir (module-level so tests can
+# monkeypatch it).
+DB_PATH = paths.server_usage_db_path()
 GO_ENDPOINT_BASE = "https://opencode.ai/workspace/"
 USER_AGENT = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
               "(KHTML, like Gecko) Chrome/126.0 Safari/537.36")

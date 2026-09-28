@@ -12,8 +12,12 @@ from datetime import datetime, timezone
 from urllib.request import Request, urlopen
 from urllib.parse import quote
 
+import paths
+
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
-REMOTE_DB = os.path.join(APP_DIR, "usage_remote.db")
+# Phase 7: mutable DB lives in the per-user data dir (module-level so tests can
+# monkeypatch it).
+REMOTE_DB = paths.usage_remote_db_path()
 USER_AGENT = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
               "(KHTML, like Gecko) Chrome/126.0 Safari/537.36")
 

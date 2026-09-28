@@ -244,3 +244,52 @@ test('interval clamps to MIN_INTERVAL_MS unless the fixture seam is used', (t) =
   assert.equal(nm.createNotificationManager({ ...base, intervalMs: 3000 }).intervalMs, nm.MIN_INTERVAL_MS);
   assert.equal(nm.createNotificationManager({ ...base, intervalMs: 3000, minIntervalMs: 1000 }).intervalMs, 3000);
 });
+
+// ---------------------------------------------------------------------------
+// Phase 7: state schema versioning
+// ---------------------------------------------------------------------------
+test('a state file missing version is migrated to the current version on save', (t) => {
+  const statePath = makeTempStatePath(t);
+  fs.writeFileSync(
+    statePath,
+    JSON.stringify({ settings: { enabled: true }, events: [] }),
+    'utf8'
+  );
+  const manager = nm.createNotificationManager({ statePath: statePath, now: () => MS });
+  manager.loadState();
+  manager.saveState();
+
+  const saved = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+  assert.equal(nm.STATE_VERSION, 1);
+  assert.equal(saved.version, nm.STATE_VERSION);
+  assert.equal(saved.settings.enabled, true);
+});
+
+test('a newer state version is never overwritten and defaults are used for the run', (t) => {
+  const statePath = makeTempStatePath(t);
+  const future = {
+    version: nm.STATE_VERSION + 1,
+    settings: { enabled: true },
+    baseline_done: true,
+    events: [{ dedupe_key: 'x' }],
+    updated_at: 123,
+  };
+  fs.writeFileSync(statePath, JSON.stringify(future), 'utf8');
+  const before = fs.readFileSync(statePath, 'utf8');
+
+  const manager = nm.createNotificationManager({ statePath: statePath, now: () => MS });
+  const loaded = manager.loadState();
+  assert.equal(loaded.version, nm.STATE_VERSION); // defaults for this run
+  assert.equal(manager.getSettings().enabled, false);
+
+  manager.saveState(); // must be a no-op for a future-version file
+  assert.equal(fs.readFileSync(statePath, 'utf8'), before);
+});
+
+test('a normal save keeps version: 1 in the state file', (t) => {
+  const { manager, statePath } = makeManager(t);
+  assert.equal(manager.setSettings({ enabled: true }).ok, true);
+  const saved = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+  assert.equal(saved.version, 1);
+  assert.equal(saved.settings.enabled, true);
+});
