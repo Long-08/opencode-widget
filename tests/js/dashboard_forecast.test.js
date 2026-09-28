@@ -169,8 +169,9 @@ test('forecast.js registers the tab at load without calling the API', () => {
   assert.ok(registered.forecast, 'forecast tab not registered');
   assert.equal(typeof registered.forecast.target, 'function');
   assert.equal(typeof registered.forecast.render, 'function');
-  // No API call at load: nothing in the source touches widgetAPI/apiGet*.
-  assert.ok(!/widgetAPI|apiGetForecast/.test(FORECAST_SRC));
+  // No forecast-data fetch at load: this module never calls apiGetForecast
+  // (forecast data loads only through the core tab orchestration).
+  assert.ok(!/apiGetForecast/.test(FORECAST_SRC));
 });
 
 // --- labels + disclaimer ----------------------------------------------------

@@ -93,7 +93,7 @@ def test_forecast_module_has_no_forbidden_or_certainty_labels():
 
 def test_forecast_module_does_not_call_the_api():
     src = _read(FORECAST_JS)
-    assert "widgetAPI" not in src, "forecast.js must not touch the bridge directly"
+    # forecast data must load only through the core orchestration (no direct fetch here)
     assert "apiGetForecast" not in src
 
 

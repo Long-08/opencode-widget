@@ -23,6 +23,8 @@ EXPECTED_WIDGET_API = {
     "saveUiState",
     "onSnapSmall",
     "onSnapRestore",
+    "onTrayRefresh",
+    "onOpenForecast",
     "setClickThrough",
     "exitSnap",
     "quit",
@@ -41,6 +43,9 @@ EXPECTED_WIDGET_API = {
     "apiPostServer",
     "apiPostCalibrate",
     "apiPostSync",
+    # Phase 6B notification settings bridge (consolidated: no separate namespace)
+    "apiGetNotificationSettings",
+    "apiSetNotificationSettings",
 }
 
 
