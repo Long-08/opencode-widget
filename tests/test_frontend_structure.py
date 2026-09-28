@@ -22,6 +22,7 @@ SCRIPTS = [
     "dashboard/agents.js",
     "dashboard/models.js",
     "dashboard/sessions.js",
+    "dashboard/forecast.js",
     "app.js",
 ]
 STATIC_FILES = ["app.css", "app.js"] + SCRIPTS[:-1]  # app.js covered by SCRIPTS

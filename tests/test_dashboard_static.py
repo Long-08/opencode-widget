@@ -17,7 +17,8 @@ INDEX_HTML = os.path.join(APP_DIR, "index.html")
 APP_CSS = os.path.join(APP_DIR, "app.css")
 APP_JS = os.path.join(APP_DIR, "app.js")
 
-TABS = ("overview", "agents", "models", "sessions")
+TABS = ("overview", "agents", "models", "sessions", "forecast")
+TAB_LABELS = ("Overview", "Agents", "Models", "Sessions", "Forecast")
 RANGES = ("today", "7d", "30d", "all")
 FORBIDDEN_COST_NAMES = ("Official Cost", "Go Usage", "Quota Cost", "Subscription Usage")
 DISCLAIMER = (
@@ -43,14 +44,14 @@ def _renderer_text():
     return "\n".join(_read(p) for p in _renderer_files())
 
 
-def test_four_tabs_with_data_tab_ids():
+def test_five_tabs_with_data_tab_ids():
     src = _read_index()
     for tab in TABS:
         assert 'data-tab="%s"' % tab in src, tab
-    for label in ("Overview", "Agents", "Models", "Sessions"):
+    for label in TAB_LABELS:
         assert label in src, label
     # keyboard-focusable native buttons with aria-labels
-    for tab, label in zip(TABS, ("Overview", "Agents", "Models", "Sessions")):
+    for tab, label in zip(TABS, TAB_LABELS):
         pattern = (
             r'<button[^>]*data-tab="%s"[^>]*aria-label="%s"' % (tab, label)
         )

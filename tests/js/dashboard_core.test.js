@@ -53,6 +53,10 @@ function recorder() {
 
 // --- range / endpoints / cache key -----------------------------------------
 
+test('DASH_TABS has the five tabs including forecast', () => {
+  assert.deepEqual(core.DASH_TABS, ['overview', 'agents', 'models', 'sessions', 'forecast']);
+});
+
 test('dashRangeValue only accepts DASH_RANGES, else all', () => {
   for (const r of ['today', '7d', '30d', 'all']) assert.equal(core.dashRangeValue(r), r);
   for (const bad of ['1', '7', 'Today', '', null, undefined, 42, {}]) {
@@ -66,11 +70,18 @@ test('dashCacheKey is tab|range with normalization', () => {
   assert.equal(core.dashCacheKey('agents', 'bogus'), 'agents|all');
 });
 
+test('dashCacheKey is range-independent for forecast', () => {
+  for (const r of ['today', '7d', '30d', 'all', 'bogus', null, undefined]) {
+    assert.equal(core.dashCacheKey('forecast', r), 'forecast', String(r));
+  }
+});
+
 test('dashEndpointsFor returns a defensive copy', () => {
   assert.deepEqual(core.dashEndpointsFor('overview'), ['agents', 'sessions']);
   assert.deepEqual(core.dashEndpointsFor('agents'), ['agents']);
   assert.deepEqual(core.dashEndpointsFor('models'), ['models']);
   assert.deepEqual(core.dashEndpointsFor('sessions'), ['sessions']);
+  assert.deepEqual(core.dashEndpointsFor('forecast'), ['forecast']);
   assert.deepEqual(core.dashEndpointsFor('nope'), []);
   const copy = core.dashEndpointsFor('overview');
   copy.push('x');
@@ -95,18 +106,33 @@ test('dashLoad requested endpoint sets per tab', async () => {
     agents: ['agents'],
     models: ['models'],
     sessions: ['sessions'],
+    forecast: ['forecast'],
   };
   for (const tab of Object.keys(expected)) {
     const cache = {};
     const rec = recorder();
+    const key = core.dashCacheKey(tab, 'today');
     const res = await core.dashLoad(tab, 'today', cache, rec.fn, {});
     assert.equal(res.fromCache, false, tab);
-    assert.equal(res.key, tab + '|today', tab);
+    assert.equal(res.key, key, tab);
     assert.deepEqual(res.fetched, expected[tab], tab);
     assert.deepEqual(rec.calls.map((c) => c[0]), expected[tab], tab);
-    assert.ok(cache[tab + '|today'], tab + ' cache populated');
+    assert.ok(cache[key], tab + ' cache populated');
     assert.deepEqual(Object.keys(res.data).sort(), expected[tab].slice().sort(), tab);
   }
+});
+
+test('dashLoad forecast reuses its single range-independent cache entry', async () => {
+  const cache = {};
+  const rec = recorder();
+  await core.dashLoad('forecast', 'today', cache, rec.fn, {});
+  const callsAfterFirst = rec.calls.length;
+  const res = await core.dashLoad('forecast', '7d', cache, rec.fn, {});
+  assert.equal(res.fromCache, true);
+  assert.equal(res.key, 'forecast');
+  assert.equal(rec.calls.length, callsAfterFirst);
+  assert.ok(cache['forecast'], 'forecast cache populated');
+  assert.equal(cache['forecast|7d'], undefined);
 });
 
 test('dashLoad reuses cache without calling fetchTab again', async () => {

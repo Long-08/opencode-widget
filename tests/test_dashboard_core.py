@@ -28,6 +28,7 @@ EXPECTED_SCRIPTS = [
     os.path.join("electron", "app", "dashboard", "agents.js"),
     os.path.join("electron", "app", "dashboard", "models.js"),
     os.path.join("electron", "app", "dashboard", "sessions.js"),
+    os.path.join("electron", "app", "dashboard", "forecast.js"),
 ]
 
 
