@@ -217,7 +217,8 @@ function loadWidgetApp() {
     'setTimeout', 'setInterval', 'clearTimeout', 'clearInterval',
     src +
     '\n;return { setUiState, render, refresh, fillModelList, rankSortedStats,'
-    + ' state, OCW, getUiState: function () { return uiState; } };'
+    + ' state, OCW, getUiState: function () { return uiState; },'
+    + ' getSelSupplier: function () { return selSupplier; } };'
   );
   const exposed = factory(doc, win, store, timers.setTimeout, timers.setInterval,
     timers.clearTimeout, timers.clearInterval);
@@ -247,6 +248,74 @@ function dispatchKeydown(app, event) {
   assert.ok(handlers.length, 'no document keydown handler registered');
   handlers.forEach((fn) => fn(Object.assign({ preventDefault() {} }, event)));
 }
+
+function dispatchKeydownPrevented(app, event) {
+  const handlers = app.doc.handlers.keydown || [];
+  assert.ok(handlers.length, 'no document keydown handler registered');
+  let prevented = false;
+  handlers.forEach((fn) => fn(Object.assign(
+    { preventDefault() { prevented = true; } }, event)));
+  return prevented;
+}
+
+// --- 6. keyboard reachability (Tab must keep native focus traversal) ---------
+test('Tab is not globally prevented and no longer cycles suppliers', async () => {
+  const app = await bootApp();
+  app.setUiState('large');
+  await app.timers.flush();
+  const before = app.getSelSupplier();
+  const prevented = dispatchKeydownPrevented(app, { key: 'Tab' });
+  assert.ok(!prevented, 'Tab must keep native focus traversal in expanded');
+  assert.equal(app.getSelSupplier(), before, 'Tab must not cycle suppliers');
+
+  app.setUiState('mid');
+  await app.timers.flush();
+  assert.ok(!dispatchKeydownPrevented(app, { key: 'Tab' }),
+    'Tab must keep native focus traversal in compact');
+
+  app.setUiState('small');
+  await app.timers.flush();
+  assert.ok(!dispatchKeydownPrevented(app, { key: 'Tab' }),
+    'Tab must keep native focus traversal in mini');
+});
+
+test('Shift+Tab keeps native reverse navigation', async () => {
+  const app = await bootApp();
+  app.setUiState('large');
+  await app.timers.flush();
+  const before = app.getSelSupplier();
+  assert.ok(!dispatchKeydownPrevented(app, { key: 'Tab', shiftKey: true }),
+    'Shift+Tab must keep native reverse traversal');
+  assert.equal(app.getSelSupplier(), before, 'Shift+Tab must not cycle suppliers');
+});
+
+test('Tab is native inside inputs and while modals are open', async () => {
+  const app = await bootApp();
+  const preventedInput = dispatchKeydownPrevented(app,
+    { key: 'Tab', target: { closest: () => ({ tagName: 'INPUT' }) } });
+  assert.ok(!preventedInput, 'input context must not hijack Tab');
+
+  el(app, '#calMask').classList.add('show');
+  const preventedModal = dispatchKeydownPrevented(app, { key: 'Tab' });
+  assert.ok(!preventedModal, 'modal context must not hijack Tab');
+});
+
+test('Enter and Space activate the mini bar (Space prevents page side effects)', async () => {
+  const app = await bootApp();
+  const bar = el(app, '#miniBar');
+  const handlers = bar.handlers.keydown || [];
+  assert.ok(handlers.length, 'mini bar must have a keydown handler');
+
+  handlers.forEach((fn) => fn({ key: 'Enter', preventDefault() {} }));
+  assert.equal(app.getUiState(), 'mid', 'Enter must open compact from mini');
+
+  app.setUiState('small');
+  await app.timers.flush();
+  let spacePrevented = false;
+  handlers.forEach((fn) => fn({ key: ' ', preventDefault() { spacePrevented = true; } }));
+  assert.equal(app.getUiState(), 'mid', 'Space must open compact from mini');
+  assert.ok(spacePrevented, 'Space activation must preventDefault the page side effect');
+});
 
 function click(app, sel) {
   const target = el(app, sel);

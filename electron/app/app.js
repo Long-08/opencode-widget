@@ -1208,11 +1208,8 @@ document.addEventListener("keydown", (e) => {
     }
     return;
   }
-  if (e.key === "Tab") {
-    if (uiState !== "mid") cycleSupplier(1);
-    e.preventDefault();
-    return;
-  }
+  // Tab 不再被劫持: 供应商/模型循环由 ←→/↑↓ 承担, Tab/Shift+Tab 保持原生焦点遍历,
+  // 使 mini bar (tabindex=0) 与各按钮真实可达。
   if (e.key === "x" || e.key === "X") {
     timeRange = TIME_RANGE_ORDER[(TIME_RANGE_ORDER.indexOf(timeRange) + 1) % TIME_RANGE_ORDER.length];
     saveViewPrefs(); render();

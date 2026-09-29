@@ -136,6 +136,13 @@ def test_esc_collapses_to_mini_and_ignores_typing_targets():
     assert "input, select, textarea" in src, "Esc must be ignored while typing"
 
 
+def test_tab_is_not_globally_prevented():
+    src = _read(APP_JS)
+    assert 'e.key === "Tab"' not in src, (
+        "global Tab hijack must be removed so Tab/Shift+Tab keep native focus traversal"
+    )
+
+
 def test_mode_scoped_body_classes_are_toggled():
     src = _read(APP_JS)
     block = _block_after_marker(src, "function setUiState(")
