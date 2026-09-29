@@ -104,7 +104,9 @@ large  ≈ Expanded  （保持 960×720 与全部能力; 不再默认常驻）
 
 - Mini 状态条：`role="button"`、`tabindex="0"`、`aria-label`，支持 Enter/Space 激活。
 - 「打开完整面板」按钮带 `aria-label`。
-- 键盘：`Esc` 收起；原有 `←→/↑↓/Tab/X` 快捷键语义未删除。
+- 键盘：`Esc` 收起；供应商/模型循环用 `←→`/`↑↓`；`Tab`/`Shift+Tab` 保持**原生焦点遍历**
+  （旧的全局 Tab 劫持已移除——它使 mini bar 与各按钮 focusable 却不可达），mini bar 可 Tab 聚焦后用
+  Enter/Space 激活；`X` 快捷键保留但当前无可见效果（历史遗留）。
 
 ## 10. 已知限制
 
@@ -113,3 +115,30 @@ large  ≈ Expanded  （保持 960×720 与全部能力; 不再默认常驻）
 - Mini 不显示配额重置倒计时（完整信息请展开查看）。
 - 键盘 `↑↓` 选择模型在 Compact 下仅前 3 项可见，选中项超出 Top 3 时不可见（选择状态本身仍生效）。
 - 截图文档（`docs/assets/*.png`）仍为重构前 UI，待下次发布统一更新。
+
+## 11. Final GUI smoke（2026-09-29，真实 Electron 会话）
+
+通过 `--remote-debugging-port` + CDP 以**真实输入事件**驱动真实应用（`data_server` + Electron 正常开发模式，
+真实账号数据；严重度变体经 `displayWindows` 注入，未消耗真实额度），逐项目检：
+
+| 项目 | 结果 |
+| --- | --- |
+| 冷启动 → Mini（真实数据 @175% DPI） | PASS：单行状态条，无裁切/换行 |
+| Mini normal / warning / critical | PASS：绿·正常 31% / 橙·注意 82% / 红·告警 96%，状态点与文案正确 |
+| Mini click → Compact | PASS；窗口真实 resize 到 560×420 后标题单行 |
+| Compact 目检 | PASS：三窗口不裁切、Top 3 完整（计数标注 Top 3）、更新时间与「打开完整面板」可见、无横/纵向溢出 |
+| Compact → Expanded | PASS |
+| Expanded 五标签回归 | PASS：Overview 正常渲染；Forecast 面板打开且有内容 |
+| Expanded → Mini（Esc） | PASS |
+| 键盘 Tab 遍历（真实按键） | PASS：`btnMin → btnExpand → btnClose → cUnitBtn → cList → btnOpenFull`，`btnOpenFull` 可达 |
+| Shift+Tab 反向遍历 | PASS：`opSlider → btnMin → btnExpand` |
+| Mini Enter / Space 激活 | PASS：两者均进入 Compact（Space preventDefault） |
+| Esc × 弹层回归 | PASS：右键菜单打开时 Esc 不收缩窗口（菜单保持、窗口保持 Compact） |
+| Tray Show Widget | PASS：tray 创建日志确认；聚焦窗口后状态保持不变（focus-only 语义） |
+| Notification → Expanded/Forecast | PASS：Forecast 页在真实会话中打开且有内容；点击链路由 node 行为测试钉住 |
+| 缩放 100%（仿真） | PASS：Mini/Compact 不裁切、按钮可点、文字可读 |
+| 缩放 125%（仿真代理） | PASS：mini bar 372×58、无溢出 |
+| 缩放 175%（当前系统 DPI，全部截图默认档） | PASS |
+
+已知观感备注：处于窗口 resize 过渡瞬间截帧会看到标题换行（旧尺寸渲染新 DOM 的过渡帧），等待 resize 落定后即单行；非产品缺陷。
+本轮内部验证截图存于 `.tmp/`（未提交、不入库）。
