@@ -158,6 +158,40 @@ def _probe_widget_health(port, timeout=1.0):
         return False
 
 
+def _existing_owned_server_running(info=None, pid_alive_fn=None, probe_fn=None):
+    """True when runtime.json names ANOTHER live, healthy widget server.
+
+    RC.2 soak finding F1: on Windows, ``ThreadingHTTPServer``'s inherited
+    ``allow_reuse_address`` (SO_REUSEADDR) lets a second server silently
+    double-bind the port, so the OSError guard in ``main()`` never fires there
+    and the first server would be orphaned (its runtime.json clobbered, no
+    auth traffic -> idle watchdog never exits). Decide ownership BEFORE
+    opening the port. Never raises; always safe to call with no info.
+    """
+    pid_alive_fn = pid_alive_fn or rl.pid_alive
+    probe_fn = probe_fn or _probe_widget_health
+    if not isinstance(info, dict):
+        return False
+    pid = info.get("pid")
+    port = info.get("port")
+    if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0:
+        return False
+    if pid == os.getpid():
+        return False
+    try:
+        port = int(port)
+    except (TypeError, ValueError):
+        return False
+    if port <= 0:
+        return False
+    try:
+        if not pid_alive_fn(pid):
+            return False
+        return bool(probe_fn(port))
+    except Exception:
+        return False
+
+
 def _startup_hygiene():
     """Best-effort cleanup before serving: never raises, never touches others.
 
@@ -1370,6 +1404,12 @@ def auto_sync_loop():
 def main():
     atexit.register(_cleanup_runtime_info)
     _startup_hygiene()
+    # F1 (RC.2 soak): on Windows the OSError guard below never fires —
+    # SO_REUSEADDR silently double-binds. Yield to a live, healthy owner
+    # named by runtime.json BEFORE touching the port.
+    if _existing_owned_server_running(info=_read_runtime_info()):
+        print("[data-server] widget already running; exiting")
+        return
     threading.Thread(target=preheat, daemon=True).start()
     threading.Thread(target=auto_sync_loop, daemon=True).start()
     threading.Thread(target=formula_sync_loop, daemon=True).start()
