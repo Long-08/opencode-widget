@@ -963,17 +963,15 @@ render();
 
 
 // 当前模式需要的 view id 集合 (纯策略, 供 refresh 与 ensureExpandedViews 共用):
-// 基础 summary 三项常取; Expanded 级逐日序列/模型曲线只在完整面板需要时预取。
+// 逐日序列/模型曲线等 Expanded 级视图只在完整面板需要; Mini/Compact 不预取任何 view,
+// 仅靠 /api/state 的 windows/stats 驱动状态条与快看卡。
 function neededViewIds(src0) {
-  const needed = new Set([viewIdFor(src0, timeRange), viewIdFor(src0, "all"), "all_all"]);
-  if (uiState === "large") {
-    needed.add(viewIdFor("all", heatRange));
-    needed.add("all_daily");
-    if (heatRange === "30" && src0 !== "all") needed.add(viewIdFor(src0, "30"));
-    if (selModel && selModel !== "__total__") {
-      needed.add(`model_${selModel}_${heatRange}`);
-      needed.add(`model_${selModel}_daily`);
-    }
+  if (uiState !== "large") return [];
+  const needed = new Set([viewIdFor("all", heatRange), "all_daily"]);
+  if (heatRange === "30" && src0 !== "all") needed.add(viewIdFor(src0, "30"));
+  if (selModel && selModel !== "__total__") {
+    needed.add(`model_${selModel}_${heatRange}`);
+    needed.add(`model_${selModel}_daily`);
   }
   return [...needed];
 }
@@ -1197,10 +1195,14 @@ render();
 }
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
-    // Esc: Compact/Expanded -> Mini (输入控件内不劫持)
+    // Esc: Compact/Expanded -> Mini (输入控件内不劫持; 弹层/右键菜单打开时不收缩窗口)
     const t = e.target;
     const typing = t && t.closest && t.closest("input, select, textarea");
-    if (!typing && uiState !== "small") {
+    const overlayOpen = ["serverMask", "calMask", "keyMask", "ctx"].some((id) => {
+      const elx = document.getElementById(id);
+      return !!(elx && elx.classList && elx.classList.contains("show"));
+    });
+    if (!typing && !overlayOpen && uiState !== "small") {
       setUiState("small", false, true);
       e.preventDefault();
     }

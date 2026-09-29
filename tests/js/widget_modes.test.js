@@ -338,6 +338,8 @@ test('expanded -> mini: the collapse button lands on the mini bar', async () => 
 test('entering expanded fetches missing views once; re-expanding hits the cache', async () => {
   const app = await bootApp();
   const viewsAtMini = app.calls.apiGetView.length;
+  assert.equal(viewsAtMini, 0,
+    'mini/compact must not prefetch any views (only /api/state + formula)');
   app.setUiState('large');
   await app.timers.flush();
   const viewsAtLarge = app.calls.apiGetView.length;
@@ -348,6 +350,22 @@ test('entering expanded fetches missing views once; re-expanding hits the cache'
   await app.timers.flush();
   assert.equal(app.calls.apiGetView.length, viewsAtLarge,
     're-expanding must serve from cache, no refetch');
+});
+
+test('Esc does not collapse the window beneath an open modal or context menu', async () => {
+  const app = await bootApp();
+  app.setUiState('large');
+  await app.timers.flush();
+  el(app, '#keyMask').classList.add('show');
+  dispatchKeydown(app, { key: 'Escape' });
+  assert.equal(app.getUiState(), 'large', 'Esc must not shrink the window under a modal');
+  el(app, '#keyMask').classList.remove('show');
+  el(app, '#ctx').classList.add('show');
+  dispatchKeydown(app, { key: 'Escape' });
+  assert.equal(app.getUiState(), 'large', 'Esc must not shrink the window under the context menu');
+  el(app, '#ctx').classList.remove('show');
+  dispatchKeydown(app, { key: 'Escape' });
+  assert.equal(app.getUiState(), 'small', 'Esc collapses once overlays are closed');
 });
 
 test('Esc collapses compact/expanded to mini but is ignored while typing', async () => {

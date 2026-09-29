@@ -62,7 +62,7 @@
 | Expanded 上按 `□` | Expanded → Compact |
 | 右键菜单「退出」/ `×` | 退出应用（语义不变） |
 
-- `Esc` 在输入控件（可观测性搜索/筛选框）内不劫持。
+- `Esc` 在输入控件（可观测性搜索/筛选框）内不劫持；设置弹窗或右键菜单打开时不收缩窗口。
 - 未新增 hover 自动展开/自动收起；本轮以**点击展开 / 点击收起**为唯一切换方式。
 
 ## 5. 托盘与通知
@@ -74,8 +74,8 @@
 ## 6. 数据与性能策略
 
 - 渲染按模式门控：Mini 只渲染状态条；Compact 不渲染图表/热力图/Expanded 模型列表；Expanded 才渲染全部分析视图。
-- 视图预取按模式收敛（`neededViewIds`）：Mini/Compact 仅取基础 summary 视图；逐日序列、模型曲线等
-  Expanded 级视图在**展开时**由 `ensureExpandedViews()` 按需补齐，命中缓存不重复请求。
+- 视图预取按模式收敛（`neededViewIds`）：Mini/Compact **不预取任何 view**（仅 `/api/state` + 公式）；
+  逐日序列、模型曲线等 Expanded 级视图在**展开时**由 `ensureExpandedViews()` 按需补齐，命中缓存不重复请求。
 - `/api/state`（60s 轮询）与公式同步语义不变；未新增任何前端 API。
 - Observability 各标签页的懒加载/缓存（`OCW.dashCache`）保持原样。
 
