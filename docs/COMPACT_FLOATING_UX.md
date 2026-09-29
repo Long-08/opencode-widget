@@ -128,10 +128,10 @@ large  ≈ Expanded  （保持 960×720 与全部能力; 不再默认常驻）
 | Mini click → Compact | PASS；窗口真实 resize 到 560×420 后标题单行 |
 | Compact 目检 | PASS：三窗口不裁切、Top 3 完整（计数标注 Top 3）、更新时间与「打开完整面板」可见、无横/纵向溢出 |
 | Compact → Expanded | PASS |
-| Expanded 五标签回归 | PASS：Overview 正常渲染；Forecast 面板打开且有内容 |
+| Expanded 五标签回归 | PASS：Overview 正常渲染；Forecast 面板打开且完整渲染（免责声明 + Type/Estimate/Basis + 5h Session 表） |
 | Expanded → Mini（Esc） | PASS |
-| 键盘 Tab 遍历（真实按键） | PASS：`btnMin → btnExpand → btnClose → cUnitBtn → cList → btnOpenFull`，`btnOpenFull` 可达 |
-| Shift+Tab 反向遍历 | PASS：`opSlider → btnMin → btnExpand` |
+| 键盘 Tab 遍历（真实按键，逐帧 activeElement 取证） | PASS：mini 冷启动自 body 起 `btnMin → btnExpand → btnClose → miniBar`（第 4 站）；聚焦 miniBar 后 Enter 打开 Compact；compact 内 `f-btn×3 → cUnitBtn → cList → btnOpenFull`，`btnOpenFull` 可达 |
+| Shift+Tab 反向遍历（Shift=8 位掩码真按键） | PASS：`btnOpenFull → cUnitBtn → f-btn`，再正向 Tab 原路返回 |
 | Mini Enter / Space 激活 | PASS：两者均进入 Compact（Space preventDefault） |
 | Esc × 弹层回归 | PASS：右键菜单打开时 Esc 不收缩窗口（菜单保持、窗口保持 Compact） |
 | Tray Show Widget | PASS：tray 创建日志确认；聚焦窗口后状态保持不变（focus-only 语义） |
