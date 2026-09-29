@@ -21,3 +21,13 @@ release/
 *.zip
 formula_cache.json
 .tmp/
+
+# 密钥与凭据文件（预防性，绝不入库；当前仓库无同名 tracked fixture）
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+credentials.json
