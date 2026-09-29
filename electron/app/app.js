@@ -17,15 +17,7 @@ const countdown = (ms) => {
   const h = Math.floor(s/3600), m = Math.floor(s%3600/60);
   return h + "时" + m + "分";
 };
-const resetLabel = (r) => {
-  if (!r) return "";
-  if (typeof r.reset === "number") return "⏳ 重置: " + countdown(r.reset - Date.now()) + " 后";
-  if (r.reset_text) return "⏳ 重置: " + r.reset_text + " 后";
-  if (typeof r === "number") return "⏳ 重置: " + countdown(r - Date.now()) + " 后";
-  return "";
-};
-const PERIODS = [["5小时","session"],["本周","weekly"],["本月","monthly"]];
-const RING_COLORS = ["#6366f1", "#a855f7", "#22d3ee"];
+const PERIODS = [["5小时","session"],["本周","weekly"],["本月","monthly"]];const RING_COLORS = ["#6366f1", "#a855f7", "#22d3ee"];
 const RING_KEYS = ["session", "weekly", "monthly"];
 const RING_R = [28, 41, 52];
 const COMPACT_H = 480, EXPAND_W = 960, EXPAND_H = 720, SMALL_W = 540, SMALL_H = 260;
@@ -62,7 +54,7 @@ function supplierList() {
 
 let state = { windows: [], stats: [], history: [], suppliers: {}, heatmap: [], mode: "overview", rows: 0, keyOk: false, models: 0, lastRefresh: 0, server: null, server_error: null };
 let lastCal = null;
-let uiState = "mid";   // small | mid | large
+let uiState = "small";   // small | mid | large（Mini 是默认常驻态）
 let selModel = null;
 let selSupplier = "go"; // null = 全部
 let heatRange = "30";    // 热力图范围: 7 | 30 | all
@@ -176,11 +168,14 @@ if (selSupplier && mFilter !== "free") cands = cands.filter(x => (x.source || ""
 const withHist = cands.find(x => state.history.some(h => h.key === x.key));
 selModel = (withHist || cands[0] || state.stats[0]).key;
 }
-  renderSide(); renderTabs(); renderModels(); renderChart();
-  renderSmall();
-  renderLarge();
+  renderMini();
+  // 分模式渲染: Mini 只画状态条; Compact 画摘要; 图表/热力图等重内容仅 Expanded
+  if (uiState !== "small") { renderSide(); renderTabs(); renderModels(); }
+  if (uiState === "large") { renderChart(); renderLarge(); }
   const ago = state.lastRefresh ? Math.round((Date.now() - state.lastRefresh) / 1000) : 0;
   const mtotal = (m && m.used) || 0;
+  const cUpd = $("#cUpdated");
+  if (cUpd) cUpd.textContent = ago > 0 ? "更新于 " + ago + "s 前" : "";
   $("#footLeft").textContent = `月消费 ${mtotal ? money(mtotal) : "—"} · ${state.rows} 条 · ${ago}s前`;
   if (state.server) {
     const cred = state.credits || 0;
@@ -255,7 +250,10 @@ function rankSortedStats() {
   });
 }
 
-function fillModelList(el, key) {
+// Compact 快看: 模型列表最多 Top 3 (完整列表在 Expanded); 排序不变, 只截断显示
+const COMPACT_MODEL_LIMIT = 3;
+
+function fillModelList(el, key, limit = 0) {
   el.innerHTML = "";
   const stats = filteredStats();
   const mode = state.mode === "overview" ? "monthly" : state.mode;
@@ -267,13 +265,14 @@ function fillModelList(el, key) {
   const rankVal = x => mUnit === "token" ? tokOf(x) : (x.group === "go" ? costOf(x) : (x[key] || 0));
   const sorted = rankSortedStats();
   const total = sorted.reduce((a, x) => a + rankVal(x), 0) || 1;
+  const shown = limit > 0 ? sorted.slice(0, limit) : sorted;
   // go 配额是共享费用池: 消耗统一取官方窗口 used(server 权威, 已含网关调用), 避免条目 cost 重复计
   const goStats = stats.filter(x => x.group === "go");
   const usedAll = (quotaWin && quotaWin.used != null && quotaWin.used > 0)
     ? quotaWin.used
     : goStats.reduce((a, x) => a + costOf(x) * (x.meter_rate || 1), 0);
   const remainAll = Math.max(0, quotaLimit - usedAll);
-  sorted.forEach(x => {
+  shown.forEach(x => {
     const div = document.createElement("div");
     const mKey = x.key || x.model;
     const isTok = mUnit === "token";
@@ -284,7 +283,7 @@ function fillModelList(el, key) {
     const isQuota = x.group === "go" && !isTok;
     const srcTag = (x.source && x.source !== "known" && x.source !== "?") ? `[${esc(supTag(x.source))}] ` : "";
     let main = isTok ? fmtTokens(val) : val + "次";
-    let barPct = 0, extra = "", rem = "";
+    let barPct = 0, extra = "", remText = "";
     if (isQuota) {
       // go 次数模式: 次数 · 消费/模型配额 · 剩余次数
       // 有效剩余 / 次均费用 / 剩余次数 均由后端计算，前端直接读取
@@ -303,7 +302,7 @@ function fillModelList(el, key) {
       main = usedCnt + "次";
       barPct = pct;
       extra = `${fmtCost(c * mRate)}/${fmtCost(modelQuota)}`;
-      if (effectiveRemain > 0 && remainCnt > 0) rem = `<span class="rem">剩${Math.round(remainCnt)}次</span>`;
+      if (effectiveRemain > 0 && remainCnt > 0) remText = "剩" + Math.round(remainCnt) + "次";
     } else if (x.group === "go") {
       // go token 模式: 已使用 · 百分比 · 该模型总量(已用 + 剩余共享费用按本模型均价折算)
       const usedTok = windowTokens(x, mode);
@@ -328,7 +327,7 @@ function fillModelList(el, key) {
       extra = fmtTokens((x.tokens_in || 0) + (x.tokens_out || 0) + (x.tokens_cache || 0)) + " tok";
     }
     const barCol = isQuota ? (barPct >= 100 ? "background:#ef4444" : "") : "";
-    div.innerHTML = `<span class="nm" title="${esc(x.model)}">${srcTag}${esc(x.name)}</span><span class="bar"><i style="width:${barPct}%${barCol ? ";" + barCol : ""}"></i></span><span class="cnt">${esc(main)}<span class="sub">${esc(extra)}</span>${esc(rem)}</span>`;
+    div.innerHTML = `<span class="nm" title="${esc(x.model)}">${srcTag}${esc(x.name)}</span><span class="bar"><i style="width:${barPct}%${barCol ? ";" + barCol : ""}"></i></span><span class="cnt">${esc(main)}<span class="sub">${esc(extra)}</span></span>${remText ? '<span class="rem">' + esc(remText) + '</span>' : ""}`;
 div.onclick = () => {
 if (selModel === mKey) selModel = null;
 else {
@@ -346,14 +345,14 @@ render();
 
 function renderModels() {
   const key = modelKey();
-  fillModelList($("#cList"), key);
-  fillModelList($("#dList"), key);
+  if (uiState !== "small") fillModelList($("#cList"), key, COMPACT_MODEL_LIMIT);
+  if (uiState === "large") fillModelList($("#dList"), key);
   const n = filteredStats().length;
   const freeAll = state.stats.filter(x => x.group === "free").length;
   const freeUsed = state.stats.filter(x => x.group === "free" && x.used !== false).length;
   let label = n + " 个模型";
   if (freeAll > 0) label += ` · free ${freeUsed}/${freeAll}`;
-  $("#cCount").textContent = label;
+  $("#cCount").textContent = label + " · Top " + COMPACT_MODEL_LIMIT;
   $("#dCount").textContent = label;
   document.querySelectorAll(".unit-btn").forEach(b => {
     b.classList.toggle("on", mUnit === "token");
@@ -721,46 +720,8 @@ function renderStats() {
     const list = supplierList();
     return list.length ? list : SUPPLIER_ORDER.slice(0, 1);
   }
-function supAgg(src) {
-  return state.suppliers[src] || { tokens: 0, cost: 0, input: 0, output: 0, cache: 0, count: 0, days: 0 };
-}
-function allAgg() {
-  return state.suppliers.all || { tokens: 0, cost: 0, input: 0, output: 0, cache: 0, count: 0, days: 0 };
-}
-
-// 按时间范围聚合小屏总量: today | 7 | all; 从 history 逐日 series 求和 (跟随当前供应商/全部)
-function aggForRange(range) {
-  const isFree = mFilter === "free";
-  const src = isFree ? null : selSupplier;
-  const byDate = {};
-  state.history.forEach(h => {
-    if (isFree) { if (!h.is_free) return; }
-    else if (src) { if (h.source !== src) return; }
-    else if (SUBSET_SRCS.includes(h.source) && h.account !== "other") return;
-    (h.series || []).forEach(p => {
-      const b = byDate[p.date] || (byDate[p.date] = { cost: 0, tokens: 0, count: 0, days: 1 });
-      b.cost += p.cost || 0;
-      b.tokens += (p.tokens_in || 0) + (p.tokens_out || 0) + (p.tokens_cache || 0);
-      b.count += p.count || 0;
-    });
-  });
-  let entries = Object.entries(byDate);
-  if (range !== "all") {
-    const cut = new Date();
-    cut.setUTCHours(0, 0, 0, 0);
-    if (range === "7") cut.setUTCDate(cut.getUTCDate() - 6);
-    const cutoffStr = cut.toISOString().slice(0, 10);
-    entries = entries.filter(([d]) => String(d).length === 10 && d >= cutoffStr);
-  }
-  const agg = { tokens: 0, cost: 0, count: 0, days: 0 };
-  const daySet = new Set();
-  entries.forEach(([d, v]) => { agg.tokens += v.tokens; agg.cost += v.cost; agg.count += v.count; daySet.add(d); });
-  agg.days = daySet.size;
-  return agg;
-}
 
 const TIME_RANGE_ORDER = ["today", "7", "all"];
-const TIME_RANGE_LABEL = { today: "今天", "7": "近7天", all: "全部" };
 const VIEW_RANGE = { today: "today", "7": "7d", "30": "30d", all: "all" };
 const viewIdFor = (src, range) => `${src || "all"}_${VIEW_RANGE[range] || range}`;
 
@@ -815,77 +776,32 @@ function modelHeatmapByDate(key) {
   return byDate;
 }
 
-function renderSmall() {
-  const grid = $("#sGrid");
-  if (!grid) return;
-  const list = activeSuppliers();
-  if (selSupplier && !list.includes(selSupplier)) selSupplier = list[0];
-  const src = selSupplier || "all";
-  const vRange = state._viewCache && state._viewCache[viewIdFor(src, timeRange)];
-  const vAll = state._viewCache && state._viewCache[viewIdFor(src, "all")];
-  const vAllAll = state._viewCache && state._viewCache["all_all"];
-  const agg = vAll ? vAll.totals : (selSupplier ? supAgg(selSupplier) : allAgg());
-  const all = vAllAll ? vAllAll.totals : allAgg();
-  const rangeAgg = vRange ? vRange.totals : aggForRange(timeRange);
-  const rangeCost = rangeAgg.cost || 0;
-  $("#sLabel").textContent = "总用量 · " + TIME_RANGE_LABEL[timeRange];
-  $("#sAmount").textContent = money(rangeCost);
-  const subCost = agg.cost || 0;
-  $("#sSub").textContent = selSupplier && state.suppliers[selSupplier] ? money(subCost) + " $ " + agg.count + "次" : "";
-  $("#sSupplier").textContent = selSupplier ? supName(selSupplier) : "全部";
-// 模型: 键盘 ↑↓ 选中的 selModel 优先(需属于当前供应商), 否则当前供应商下用量最多的模型
-let curModel = null;
-if (selModel) {
-const m = state.stats.find(x => x.key === selModel);
-// free 模式不归供应商, 跳过供应商归属校验
-if (m && (mFilter === "free" || !selSupplier || (m.source || "").includes(selSupplier))) curModel = m;
+function renderMini() {
+  const pctEl = $("#miniPct");
+  if (!pctEl) return;
+  const wins = displayWindows();
+  const s = wins.find(x => x.kind === "session"), w = wins.find(x => x.kind === "weekly"), m = wins.find(x => x.kind === "monthly");
+  if (!s || !w || !m) return;
+  const hot = [s, w, m].reduce((a, b) => (a.pct > b.pct ? a : b));
+  const sev = miniSeverity(hot.pct);
+  pctEl.textContent = "本月 " + Math.round(m.pct) + "%";
+  const costEl = $("#miniCost");
+  costEl.textContent = m.used != null ? money(m.used) : "—";
+  costEl.title = "本月官方计量 " + (m.used != null ? money(m.used) : "—") + (m.limit != null ? " / " + money(m.limit) : "");
+  $("#miniState").textContent = sev.label;
+  const dot = $("#miniDot");
+  dot.style.background = sev.color;
+  dot.style.boxShadow = "0 0 5px " + sev.color;
+  const key = $("#miniKey");
+  key.textContent = state.keyOk ? "Key ✓" : "Key ✗";
+  key.className = "mb-item " + (state.keyOk ? "mb-ok" : "mb-err");
 }
-if (!curModel) {
-const srcStats = (mFilter === "free" || !selSupplier)
-? state.stats
-: state.stats.filter(x => (x.source || "").includes(selSupplier));
-curModel = [...srcStats].sort((a, b) => (b.count_total || 0) - (a.count_total || 0))[0] || null;
-}
-  $("#sModel").textContent = curModel ? `${curModel.name} · ${(curModel.count_total || 0).toLocaleString()} 次` : "—";
-  // 当前模型补充指标 (右侧, 供应商/模型下方)
-  const mstats = $("#sMStats");
-  if (mstats) {
-    if (curModel) {
-      const mTok = (curModel.tokens_in || 0) + (curModel.tokens_out || 0) + (curModel.tokens_cache || 0);
-      const mCost = (curModel.cost_total || 0) * (curModel.meter_rate || 1);
-      const hit = (curModel.cache_hit || 0).toFixed(1) + "%";
-      const sess = (curModel.sessions || 0) + " 个";
-      mstats.innerHTML =
-        `<span>Token<b>${fmtTokens(mTok)}</b></span><span>费用<b>${money(mCost)}</b></span>` +
-        `<span>命中<b>${hit}</b></span><span>会话<b>${sess}</b></span>`;
-    } else {
-      mstats.innerHTML = "";
-    }
-  }
-  // 重置滚动信息: 仅 Go 等带 server 配额(window reset)的供应商显示, 位于模型指标与总Token之间
-  const sreset = $("#sReset");
-  if (sreset) {
-    let resetText = "";
-    if (selSupplier === "go") {
-      const rw = state.mode === "overview"
-        ? win(timeRange === "today" ? "session" : timeRange === "7" ? "weekly" : "monthly")
-        : win(state.mode);
-      if (rw && rw.reset) resetText = resetLabel(rw);
-    }
-    sreset.textContent = resetText;
-    sreset.style.display = resetText ? "" : "none";
-  }
-  const pct = all.tokens > 0 ? (agg.tokens / all.tokens * 100) : 0;
-  const gAgg = rangeAgg;
-  const gridCost = gAgg.cost || 0;
-  const rows = [
-    ["总Token", fmtTokens(gAgg.tokens)],
-    ["总费用", money(gridCost)],
-    ["总次数", (gAgg.count || 0) + " 次"],
-    ["活跃天数", (gAgg.days || 0) + " 天"],
-  ];
-  grid.innerHTML = rows.map(([a, b]) =>
-    `<div class="sg"><span>${a}</span><b>${b}</b></div>`).join("");
+
+// Mini 状态阈值与 ringColor 一致: >=95 告警, >=70 注意, 其余正常
+function miniSeverity(pct) {
+  if (pct >= 95) return { label: "告警", color: "var(--danger)" };
+  if (pct >= 70) return { label: "注意", color: "var(--warn)" };
+  return { label: "正常", color: "var(--green)" };
 }
 
 const HEAT_COLORS = ["#1a2333", "#2b3a67", "#3f55a8", "#6366f1", "#8b8bf5", "#a5a5ff"];
@@ -1046,6 +962,27 @@ render();
 
 
 
+// 当前模式需要的 view id 集合 (纯策略, 供 refresh 与 ensureExpandedViews 共用):
+// 逐日序列/模型曲线等 Expanded 级视图只在完整面板需要; Mini/Compact 不预取任何 view,
+// 仅靠 /api/state 的 windows/stats 驱动状态条与快看卡。
+function neededViewIds(src0) {
+  if (uiState !== "large") return [];
+  const needed = new Set([viewIdFor("all", heatRange), "all_daily"]);
+  if (heatRange === "30" && src0 !== "all") needed.add(viewIdFor(src0, "30"));
+  if (selModel && selModel !== "__total__") {
+    needed.add(`model_${selModel}_${heatRange}`);
+    needed.add(`model_${selModel}_daily`);
+  }
+  return [...needed];
+}
+
+// 进入 Expanded 时补齐缺失的 view 缓存 (fetchView 命中缓存不发包, 不整段清缓存重拉)。
+async function ensureExpandedViews() {
+  if (uiState !== "large") return;
+  const ids = neededViewIds(selSupplier || "all");
+  await Promise.all(ids.map(id => fetchView(id)));
+}
+
 async function refresh() {
   try {
     const data = await window.widgetAPI.apiGetState();
@@ -1059,14 +996,7 @@ async function refresh() {
     state.keyOk = !!data.key; state.models = data.models || 0;
     await loadFormula(false);
     state._viewCache = {};
-    const src0 = selSupplier || "all";
-    const needed = new Set([viewIdFor(src0, timeRange), viewIdFor(src0, "all"), "all_all", viewIdFor("all", heatRange), "all_daily"]);
-    if (heatRange === "30" && src0 !== "all") needed.add(viewIdFor(src0, "30"));
-    if (selModel && selModel !== "__total__") {
-      needed.add(`model_${selModel}_${heatRange}`);
-      needed.add(`model_${selModel}_daily`);
-    }
-    await Promise.all([...needed].map(id => fetchView(id)));
+    await Promise.all(neededViewIds(selSupplier || "all").map(id => fetchView(id)));
     render();
     // Phase 5A: 既有刷新控件仅刷新当前可观测性 tab + range (force), 不扇形刷新其它 tab
     if (uiState === "large") OCW.obsEnsure(OCW.getActiveTab(), true);
@@ -1085,6 +1015,10 @@ function setUiState(v, noResize, manual) {
   }
   uiState = v;
   const onLarge = v === "large";
+  // 模式化 chrome: 页脚/滑杆等按状态显隐 (CSS 侧 body.mode-*)
+  document.body.classList.toggle("mode-small", v === "small");
+  document.body.classList.toggle("mode-compact", v === "mid");
+  document.body.classList.toggle("mode-expanded", v === "large");
   $("#btnExpand").classList.toggle("on", onLarge);
   $("#btnExpand").textContent = onLarge ? "▣" : "□";
   $("#smallView").classList.toggle("on", v === "small");
@@ -1093,7 +1027,10 @@ function setUiState(v, noResize, manual) {
   // Phase 5A: 可观测性仪表盘仅在 large 显示; 首次显示只懒加载当前 tab
   const obsRoot = document.getElementById("obsDashboard");
   if (obsRoot) obsRoot.classList.toggle("on", onLarge);
-  if (onLarge) OCW.obsEnsure(OCW.getActiveTab());
+  if (onLarge) {
+    OCW.obsEnsure(OCW.getActiveTab());
+    ensureExpandedViews();
+  }
   if (!noResize) {
     window.widgetAPI.resize(v === "small" ? "small" : (onLarge ? "large" : "mid"));
   }
@@ -1141,9 +1078,10 @@ document.addEventListener("DOMContentLoaded", () => {
       localStorage.setItem("opacity", String(v));
     });
 });
-async function initExpanded() {
+async function initDefaultView() {
   try {
-    setUiState("mid");
+    // 冷启动恒回 Mini（窗口出生即 Mini 尺寸, noResize 避免启动闪动）。
+    setUiState("small", true);
   } catch (_) {}
 }
 
@@ -1202,6 +1140,19 @@ async function doGrab() {
 $("#btnMin").onclick = () => setUiState(uiState === "small" ? "mid" : "small", false, true);
 $("#btnExpand").onclick = () => setUiState(uiState === "large" ? "mid" : "large", false, true);
 $("#btnClose").onclick = () => window.widgetAPI.quit();
+// Compact 快看卡: 显式入口进入 Expanded 完整面板
+$("#btnOpenFull").onclick = () => setUiState("large", false, true);
+
+// Mini 常驻态: 点击状态条(或 Enter/Space)进入 Compact 快速查看; 手动切换会先退出吸顶。
+$("#smallView").addEventListener("click", () => {
+  if (uiState === "small") setUiState("mid", false, true);
+});
+$("#miniBar").addEventListener("keydown", (e) => {
+  if (e.key === "Enter" || e.key === " ") {
+    e.preventDefault();
+    if (uiState === "small") setUiState("mid", false, true);
+  }
+});
 
 // 键盘导航: ←→ 切供应商(含"全部"), ↑↓ 切模型 (小窗/大窗生效)
 function cycleSupplier(dir) {
@@ -1243,11 +1194,22 @@ selModel = keys[ni % keys.length];
 render();
 }
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Tab") {
-    if (uiState !== "mid") cycleSupplier(1);
-    e.preventDefault();
+  if (e.key === "Escape") {
+    // Esc: Compact/Expanded -> Mini (输入控件内不劫持; 弹层/右键菜单打开时不收缩窗口)
+    const t = e.target;
+    const typing = t && t.closest && t.closest("input, select, textarea");
+    const overlayOpen = ["serverMask", "calMask", "keyMask", "ctx"].some((id) => {
+      const elx = document.getElementById(id);
+      return !!(elx && elx.classList && elx.classList.contains("show"));
+    });
+    if (!typing && !overlayOpen && uiState !== "small") {
+      setUiState("small", false, true);
+      e.preventDefault();
+    }
     return;
   }
+  // Tab 不再被劫持: 供应商/模型循环由 ←→/↑↓ 承担, Tab/Shift+Tab 保持原生焦点遍历,
+  // 使 mini bar (tabindex=0) 与各按钮真实可达。
   if (e.key === "x" || e.key === "X") {
     timeRange = TIME_RANGE_ORDER[(TIME_RANGE_ORDER.indexOf(timeRange) + 1) % TIME_RANGE_ORDER.length];
     saveViewPrefs(); render();
@@ -1385,7 +1347,7 @@ function syncScale() {
   document.documentElement.style.setProperty("--scale", String(s));
 }
 window.addEventListener("resize", syncScale);
-setTimeout(initExpanded, 200);
+setTimeout(initDefaultView, 200);
 setTimeout(() => loadFormula(false), 300);
 setTimeout(refresh, 100);
 syncScale();

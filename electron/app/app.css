@@ -79,6 +79,10 @@
   .c-reset-dot { display: inline-block; width: 5px; height: 5px; border-radius: 50%; background: var(--warn, #f59e0b); animation: pulse 1.4s ease-in-out infinite; box-shadow: 0 0 3px var(--warn, #f59e0b); }
 
   .c-tabs { display: flex; gap: 5px; padding: 2px 0; flex-shrink: 0; }
+  .c-actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 2px 0; margin-top: 4px; border-top: 1px solid var(--border); flex-shrink: 0; }
+  .c-updated { font-size: 9.5px; color: var(--faded); }
+  .c-expand-btn { border: 1px solid rgba(99,102,241,0.4); background: rgba(99,102,241,0.15); color: #c7c9ff; font-size: 11px; padding: 5px 12px; border-radius: 8px; cursor: pointer; transition: all .15s; }
+  .c-expand-btn:hover { background: rgba(99,102,241,0.3); color: #fff; }
   .tab { flex: 1; text-align: center; padding: 5px 0; border-radius: 8px; font-size: 11px; color: var(--dim); background: rgba(255,255,255,0.04); border: 1px solid transparent; cursor: pointer; transition: all .15s; }
   .tab:hover { background: rgba(255,255,255,0.07); color: var(--text); }
   .tab.active { background: linear-gradient(135deg, var(--accent), var(--violet)); color: #fff; font-weight: 600; }
@@ -118,30 +122,25 @@
   .d-list-card .m-item .sub { font-size: 11px; }
   .d-list-card .m-item .rem { font-size: 11px; }
 
-  /* ---- small (最小化) ---- */
-  .small { flex: 1; display: none; flex-direction: column; min-height: 0; gap: 2px; }
+  /* ---- small (Mini: 默认常驻状态条) ---- */
+  .small { flex: 1; display: none; flex-direction: column; min-height: 0; }
   .small.on { display: flex; }
-  .s-top { display: flex; align-items: stretch; gap: 10px; flex: 1; min-height: 0; }
-  .s-info { flex: 1; display: flex; flex-direction: column; gap: 1px; min-width: 0; }
-  .s-sup { font-size: 14px; font-weight: 800; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .s-model { font-size: 12px; color: var(--cyan); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .s-mstats { display: grid; grid-template-columns: auto auto; gap: 1px 12px; font-size: 10px; color: var(--dim); margin-top: 2px; }
-  .s-mstats b { color: var(--text); font-weight: 600; margin-left: 3px; }
-  .s-reset { font-size: 10px; color: var(--warn, #f59e0b); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .mini-bar { flex: 1; display: flex; align-items: center; gap: 10px; padding: 0 8px; min-width: 0; cursor: pointer; border-radius: 12px; overflow: hidden; }
+  .mini-bar:hover { background: rgba(255,255,255,0.05); }
+  .mb-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); flex-shrink: 0; }
+  .mb-name { font-size: 11px; font-weight: 800; color: var(--text); letter-spacing: 0.5px; flex-shrink: 0; }
+  .mb-item { font-size: 12px; font-weight: 600; color: var(--text); white-space: nowrap; }
+  .mb-ok { color: var(--dim); font-weight: 500; }
+  .mb-err { color: var(--danger); }
   .s-hint { font-size: 9px; color: var(--faded); letter-spacing: 0.5px; }
-  .s-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 14px; font-size: 11px; color: var(--dim); flex-shrink: 0; }
-  .s-grid .sg { display: flex; justify-content: space-between; gap: 8px; padding: 3px 10px; background: var(--glass); border: 1px solid var(--border); border-radius: 7px; }
-  .s-grid .sg b { color: var(--text); font-weight: 700; }
-  /* 小窗圆环内文字缩小, 避免与圆环重叠 */
-  .small .rc .label { font-size: calc(8.5px * var(--scale, 1)); margin-top: calc(-17px * var(--scale, 1)); }
-  .small .rc .amount { font-size: 17px; font-weight: 700; }
-  .small .ring-sub { font-size: 7.5px; }
-  .small .ringbox { flex: 0 0 40%; height: 100%; min-width: 0; }
-  .small .ringbox svg { height: calc(100% - 26px); }
-  .small .s-info { flex: 1; height: 100%; min-width: 0; }
-  .small .s-sup { margin-top: auto; }
-  .small .s-grid { font-size: 10px; grid-template-columns: 1fr; gap: 3px; margin-top: auto; }
   footer .s-hint { flex: 1; text-align: center; }
+
+  /* ---- 模式化 chrome: Mini 只保留标识+窗口按钮 (Key 状态已在状态条内) ---- */
+  body.mode-small footer, body.mode-small .op-wrap, body.mode-small .status,
+  body.mode-small .brand .title { display: none; }
+  body.mode-small header { padding: 4px 10px 0; }
+  /* Compact 不显示页脚 (更新时间在 .c-actions 内) */
+  body.mode-compact footer { display: none; }
 
   /* ---- expanded dashboard ---- */
   .dash { flex: 1; display: none; flex-direction: column; min-height: 0; }

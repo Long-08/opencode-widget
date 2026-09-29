@@ -20,3 +20,4 @@ dist/
 release/
 *.zip
 formula_cache.json
+.tmp/
